@@ -1,5 +1,6 @@
 *
 !.gitignore
+!**/.gitkeep
 !pretrained
 !pretrained/dphubert
 !pretrained/pyannote.audio
