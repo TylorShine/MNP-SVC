@@ -26,7 +26,7 @@ MNP-SVC は、自由なAIボイスチェンジャーソフトウェアをPCで�
 
 MNPとは: Minimized-and-Noised-Phase harmonic source です。  
 いくつかの実験の結果、不自然で少し耳につく変換結果はおそらく位相が線形であることに起因するであろうと(経験から)仮定して、サウンド合成器のハーモニックソースを線形位相sinc関数から窓関数を適用した最小位相sinc関数に変更しました。(そしておそらく、線形位相であることはフィルタの学習を難しくしています。)  
-このことは、人の音声を含む自然に発声しうるすべての音は最小位相であることからも適切であると考えます。  
+このことは、人の音声を含む自然で発生しうるすべての音は最小位相であることからも適切であると考えます。  
 音響モデルも改善しました: Noised-Phase Harmonic Source (私は学者ではありませんが、そう名付けました。)
 
 
@@ -66,7 +66,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/)  ([pytorch_mode
 
 - ピッチ抽出器:
 
-  1. [RMVPE](https://github.com/yxlllc/RMVPE/releases/download/230917/rmvpe.zip) をダウンロードし、`models/pretrained/`以下にzipふぁいるを展開します。 (`models/pretrained/rmvpe/...`のようになります。)
+  1. [RMVPE](https://github.com/yxlllc/RMVPE/releases/download/230917/rmvpe.zip) をダウンロードし、`models/pretrained/`以下にzipファイルを展開します。 (`models/pretrained/rmvpe/...`のようになります。)
 
 - MNP-SVC 事前学習モデル:
 
@@ -95,7 +95,7 @@ dataset/audio/2_second-speaker/bbb.wav
 **単一話者** モデルの場合は以下のようになります:
 
 ```bash
-# single speaker dataset
+# 単一話者データセット
 dataset/audio/aaa.wav
 dataset/audio/bbb.wav
 ...
@@ -170,7 +170,16 @@ python gui.py
 フロントエンドは移動窓、クロスフェード、SOLAベースの切継ぎなどを使用し、低遅延と低負荷を維持しながら品質をノンリアルタイムと近づけるようにしています。
 
 
-## 8. 🙏謝辞
+## 8. ⚖️ライセンス
+[MIT License](LICENSE) です。
+
+
+## 9. TODOs
+- [ ] ONNX 形式にエクスポートするコードの追加
+- [ ] WebUI の作成
+
+
+## 10. 🙏謝辞
 
 - [ddsp](https://github.com/magenta/ddsp)
 
@@ -188,5 +197,4 @@ python gui.py
 - [DPHuBERT](https://github.com/pyf98/DPHuBERT)
 
 - [ConvNeXt V2](https://github.com/facebookresearch/ConvNeXt-V2)
-  
-  
+

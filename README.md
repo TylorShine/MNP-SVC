@@ -160,7 +160,16 @@ python gui.py
 The front-end uses technologies such as sliding window, cross-fading, SOLA-based splicing and contextual semantic reference, which can achieve sound quality close to non-real-time synthesis with low latency and resource occupation.
 
 
-## 8. 🙏Acknowledgement
+## 8. ⚖️License
+[MIT License](LICENSE)
+
+
+## 9. TODOs
+- [ ] Export to ONNX
+- [ ] Make WebUI
+
+
+## 10. 🙏Acknowledgement
 
 - [ddsp](https://github.com/magenta/ddsp)
 
