@@ -65,8 +65,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/) speaker embed e
 
 - MNP-SVC pre-trained model:
 
-  TODO: Add Download Link  
-  Download the (only feature conv) pre-trained [model](#). Use this later, keep in mind.
+  Download the (only feature conv) pre-trained [model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt). Use this later, keep in mind.
 
 
 ## 3. 🛠️Preprocessing
