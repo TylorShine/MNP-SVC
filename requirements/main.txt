@@ -1,0 +1,23 @@
+einops
+flask
+flask_cors
+librosa
+local_attention
+matplotlib
+numpy
+PyYAML
+pyworld
+resampy
+scikit_learn
+scipy
+SoundFile
+tensorboard
+torchcrepe
+torchfcpe
+tqdm
+transformers
+protobuf<=4.25.3    # wait to update tensorboard
+pysimplegui==4.60.5
+sounddevice
+gradio
+pyannote.audio
