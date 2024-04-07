@@ -277,7 +277,8 @@ if __name__ == '__main__':
         
     # load speaker embed
     use_spk_embed = False
-    if args.model.use_speaker_embed is not None and cmd.spk_embed != "None":
+    # if args.model.use_speaker_embed is not None and cmd.spk_embed != "None":
+    if args.model.use_speaker_embed is not None:
         # speaker embed or mix-speaker dictionary
         spk_mix_dict = literal_eval(cmd.spk_mix_dict)
         if spk_mix_dict is not None:
@@ -298,7 +299,7 @@ if __name__ == '__main__':
             if cmd.spk_embed != "None" or spk_info is None:
                 spk_id = torch.from_numpy(np.load(cmd.spk_embed, allow_pickle=True)[cmd.spk_id].item()['spk_embed'][np.newaxis, :]).float().to(device).unsqueeze(0)
             else:
-                spk_id = spk_info[cmd.spk_id].item()['spk_embed'][np.newaxis, :].unsqueeze(0)
+                spk_id = torch.from_numpy(spk_info[cmd.spk_id].item()['spk_embed'][np.newaxis, :]).unsqueeze(0)
             spk_mix = torch.tensor([[[1.]]])
         use_spk_embed = True
     else:
