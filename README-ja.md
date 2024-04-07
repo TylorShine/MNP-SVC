@@ -42,6 +42,20 @@ DDSP-SVCとのAIモデルの構造の違いは、大まかに:
 
 ## 1. 🔨依存環境の構築
 
+### (Windowsユーザー向け) 簡易セットアップ
+
+`launch.bat` をダブルクリックします。このスクリプトは初回実行時に:
+
+1. [WinPython](https://winpython.github.io/) のダウンロード
+1. ダウンロードしたファイルの展開
+1. Python venv 環境を作成し、依存パッケージをインストール
+
+を実行します.  
+次回からは、このスクリプトを実行して起動したコンソールを使用できます。
+
+
+### (その他のOSのユーザー向け) 手動セットアップ
+
 事前にPythonを実行できる環境を用意し(Windowsの方は[WinPython](https://winpython.github.io/)など。作者もこちらでvenvで仮想環境を作成して開発しています。)、はじめに [PyTorch 公式ウェブサイト](https://pytorch.org/) の手順でお使いの環境にあったPyTorchをインストールしてください。  
 その後:
 
@@ -170,16 +184,29 @@ python gui.py
 フロントエンドは移動窓、クロスフェード、SOLAベースの切継ぎなどを使用し、低遅延と低負荷を維持しながら品質をノンリアルタイムと近づけるようにしています。
 
 
-## 8. ⚖️ライセンス
+## 8. ONNXへのエクスポート
+
+以下のコマンドでONNX形式にエクスポートします:
+
+```bash
+python -m tools.export_onnx -i <model_num.pt>
+```
+
+入力ファイルと同一ディレクトリに`model_num.onnx`のように出力されます。  
+その他のオプションは `python -m tools.export_onnx -h` で確認してください。  
+エクスポートされたonnxファイルは、リアルタイムVCや非リアルタイムVCで同じように使用できます。今のところCPU推論のみの対応です。
+
+
+## 9. ⚖️ライセンス
 [MIT License](LICENSE) です。
 
 
-## 9. TODOs
-- [ ] ONNX 形式にエクスポートするコードの追加
+## 10. ✅️TODOs
+- [x] ONNX 形式にエクスポートするコードの追加
 - [ ] WebUI の作成
 
 
-## 10. 🙏謝辞
+## 11. 🙏謝辞
 
 - [ddsp](https://github.com/magenta/ddsp)
 

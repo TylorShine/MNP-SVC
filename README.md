@@ -40,6 +40,19 @@ Disclaimer: Please make sure to only train DDSP-SVC models with **legally obtain
 
 ## 1. 🔨Installing the dependencies
 
+### (for Windows users) Easy setup
+
+Simply double-clicking `launch.bat`. This script doing:
+1. Download the [WinPython](https://winpython.github.io/)
+1. Extract downloaded archive
+1. Make the venv python environment and install require packages
+
+when first time execution.  
+For the next time, you can launch this script and use this console.
+
+
+### (for other OS users) Manual setup
+
 We recommend first installing PyTorch from the [official website](https://pytorch.org/), then run:
 
 ```bash
@@ -160,16 +173,29 @@ python gui.py
 The front-end uses technologies such as sliding window, cross-fading, SOLA-based splicing and contextual semantic reference, which can achieve sound quality close to non-real-time synthesis with low latency and resource occupation.
 
 
-## 8. ⚖️License
+## 8. Export to ONNX
+
+Execute following command:
+
+```bash
+python -m tools.export_onnx -i <model_num.pt>
+```
+
+Export to the same directory as the input file with named like `model_num.onnx`.  
+Other options can be found in `python -m tools.export_onnx -h`.  
+The exported onnx files can be used in the same way for real-time and non-real-time VC. For now, only CPU inference is supported.
+
+
+## 9. ⚖️License
 [MIT License](LICENSE)
 
 
-## 9. TODOs
-- [ ] Export to ONNX
+## 10. ✅️TODOs
+- [x] Export to ONNX
 - [ ] Make WebUI
 
 
-## 10. 🙏Acknowledgement
+## 11. 🙏Acknowledgement
 
 - [ddsp](https://github.com/magenta/ddsp)
 
