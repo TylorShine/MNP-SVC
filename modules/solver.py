@@ -41,7 +41,7 @@ def test(args, model, loss_func, loader_test, saver):
 
             # forward
             st_time = time.time()
-            signal, _, (s_h, s_n) = model(units, data['f0'], data['volume'], data[spk_id_key])
+            signal = model(units, data['f0'], data['volume'], data[spk_id_key])
             ed_time = time.time()
 
             # crop
