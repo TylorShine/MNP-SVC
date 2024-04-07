@@ -314,12 +314,12 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
             
             # forward
             if dtype == torch.float32:
-                signal, _, (_, _) = model(units.float(), f0, volume, data[spk_id_key],
+                signal = model(units.float(), f0, volume, data[spk_id_key],
                                               infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
             else:
                 with autocast(device_type=args.device, dtype=dtype):
-                    signal, _, (_, _) = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    signal = model(units.to(dtype), f0, volume, data[spk_id_key],
                                                   infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
 

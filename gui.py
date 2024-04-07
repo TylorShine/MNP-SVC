@@ -4,7 +4,7 @@ import torch, librosa, threading, pickle
 import numpy as np
 from torch.nn import functional as F
 from torchaudio.transforms import Resample
-from modules.vocoder import load_model
+from modules.vocoder import load_model, load_onnx_model
 from modules.extractors import F0Extractor, VolumeExtractor, UnitsEncoder
 from modules.extractors.common import upsample
 import time
@@ -49,7 +49,13 @@ class SvcDDSP:
 
         # load ddsp model
         if self.model is None or self.model_path != model_path:
-            self.model, self.args, self.spk_info = load_model(model_path, device=self.device)
+            model_path_ext = model_path.split('.')[-1]
+            if model_path_ext == 'onnx':
+                self.model, self.args, self.spk_info = load_onnx_model(
+                        model_path, providers=['CPUExecutionProvider'])  # TODO: make providers selectable
+                self.device = 'cpu'
+            else:
+                self.model, self.args, self.spk_info = load_model(model_path, device=self.device)
             self.model_path = model_path
 
             # load units encoder
@@ -72,6 +78,8 @@ class SvcDDSP:
                 }
             else:
                 self.spk_embeds = None
+                
+        return self.device
                 
 
     def infer(self,
@@ -131,18 +139,26 @@ class SvcDDSP:
 
         # spk_id or spk_mix_dict
         if self.spk_info is None:
-            spk_id = torch.LongTensor(np.array([[spk_id]])).to(self.device)
+            if use_spk_mix:
+                spk_id = torch.LongTensor(np.array([int(k) for k in spk_mix_dict.keys()])).to(self.device)
+                spk_mix = torch.tensor([[[float(v) for v in spk_mix_dict.values()]]]).transpose(-1, 0).to(self.device)
+            else:
+                spk_id = torch.LongTensor(np.array([spk_id])).to(self.device)
+                spk_mix = torch.tensor([[[1.]]]).to(self.device)
         else:
-            spk_id = self.spk_embeds.get(str(spk_id))
-            if spk_id is None:
-                spk_id = list(self.spk_embeds.values())[0]
-        dictionary = None
-        if use_spk_mix:
-            dictionary = spk_mix_dict
+            if use_spk_mix:
+                spk_id = torch.stack([self.spk_embeds[str(k)] for k in spk_mix_dict.keys()]).to(self.device)
+                spk_mix = torch.tensor([[[float(v) for v in spk_mix_dict.values()]]]).transpose(-1, 0).to(self.device)
+            else:
+                spk_id = self.spk_embeds.get(str(spk_id))
+                if spk_id is None:
+                    spk_id = list(self.spk_embeds.values())[0]
+                spk_id = spk_id.unsqueeze(0)
+                spk_mix = torch.tensor([[[1.]]]).to(self.device)
 
         # forward and return the output
         with torch.no_grad():
-            output, _, (_, _) = self.model(units, f0, volume, spk_id=spk_id, spk_mix_dict=dictionary)
+            output = self.model(units, f0, volume, spk_id=spk_id, spk_mix=spk_mix)
             output *= mask
             output_sample_rate = self.args.data.sampling_rate
 
@@ -320,8 +336,6 @@ class GUI:
                     self.config.spk_mix_dict = eval("{" + spk_mix.replace('，', ',').replace('：', ':') + "}")
             elif event == 'f0_mode':
                 self.config.select_pitch_extractor = values['f0_mode']
-            elif event == 'use_enhancer':
-                self.config.use_vocoder_based_enhancer = values['use_enhancer']
             elif event == 'use_phase_vocoder':
                 self.config.use_phase_vocoder = values['use_phase_vocoder']
             elif event == 'load_config' and not flag_vc:
@@ -374,17 +388,16 @@ class GUI:
         self.window['crossfade'].update(self.config.crossfade_time)
         self.window['extra'].update(self.config.extra_time)
         self.window['f0_mode'].update(self.config.select_pitch_extractor)
-        self.window['use_enhancer'].update(self.config.use_vocoder_based_enhancer)
 
     def start_vc(self):
         '''开始音频转换'''
         torch.cuda.empty_cache()
+        self.device = self.svc_model.update_model(self.config.checkpoint_path)
         self.input_wav = np.zeros(self.input_frame, dtype='float32')
         self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
         self.fade_in_window = torch.sin(
             np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
         self.fade_out_window = 1 - self.fade_in_window
-        self.svc_model.update_model(self.config.checkpoint_path)
         self.start_stream()
 
     def start_stream(self):

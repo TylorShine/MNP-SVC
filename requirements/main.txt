@@ -5,6 +5,10 @@ librosa
 local_attention
 matplotlib
 numpy
+onnx
+onnxruntime
+# onnxruntime-gpu   # for gpu
+onnxsim
 PyYAML
 pyworld
 resampy

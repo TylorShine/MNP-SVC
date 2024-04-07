@@ -1,11 +1,13 @@
 import os
 
+import onnxruntime
 import numpy as np
 import torch
 import torch.nn.functional as F
 import yaml
 
 from modules.common import DotDict
+
 
 def load_model(
         model_path,
@@ -48,6 +50,61 @@ def load_model(
     model.to(device)
     model.load_state_dict(ckpt['model'])
     model.eval()
+    
+    if args.model.use_speaker_embed:
+        spk_info_path = os.path.join(os.path.split(model_path)[0], 'spk_info.npz')
+        if os.path.isfile(spk_info_path):
+            spk_info = np.load(spk_info_path, allow_pickle=True)
+        else:
+            print(' [Warning] spk_info.npz not found but model seems to setup with speaker embed')
+            spk_info = None
+    else:
+        spk_info = None
+    
+    return model, args, spk_info
+
+
+def load_onnx_model(
+            model_path,
+            providers=['CPUExecutionProvider'],
+            device='cpu'):
+    config_file = os.path.join(os.path.split(model_path)[0], 'config.yaml')
+    with open(config_file, "r") as config:
+        args = yaml.safe_load(config)
+    args = DotDict(args)
+    
+    sess = onnxruntime.InferenceSession(
+        model_path,
+        providers=providers)
+    
+    # load model
+    model = None
+    if args.model.type == 'CombSubMinimumNoisedPhase':
+        model = CombSubMinimumNoisedPhase(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            use_f0_offset=args.model.use_f0_offset,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            onnx_unit2ctrl=sess,
+            device=device)
+            
+    else:
+        raise ValueError(f" [x] Unknown Model: {args.model.type}")
     
     if args.model.use_speaker_embed:
         spk_info_path = os.path.join(os.path.split(model_path)[0], 'spk_info.npz')
@@ -106,12 +163,15 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             noise_to_harmonic_phase=False,
             use_f0_offset=False,
             use_pitch_aug=False,
-            noise_seed=289):
+            noise_seed=289,
+            onnx_unit2ctrl=None,
+            export_onnx=False,
+            device=None):
         super().__init__()
 
         print(' [DDSP Model] Minimum-Phase harmonic Source Combtooth Subtractive Synthesiser')
         
-        device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        # device = 'cuda' if torch.cuda.is_available() else 'cpu'
         
         # params
         self.register_buffer("sampling_rate", torch.tensor(sampling_rate))
@@ -145,30 +205,44 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         if use_f0_offset:
             split_map['f0_offset'] = block_size//f0_offset_size_downsamples
             
-        from .unit2control import Unit2ControlGE2E
-        self.unit2ctrl = Unit2ControlGE2E(n_unit, spk_embed_channels, split_map,
-                                          n_hidden_channels=n_hidden_channels,
-                                          n_spk=n_spk,
-                                          use_pitch_aug=use_pitch_aug,
-                                          use_spk_embed=use_speaker_embed,
-                                          use_embed_conv=use_embed_conv,
-                                          embed_conv_channels=64, conv_stack_middle_size=32)
+        
+        if onnx_unit2ctrl is not None:
+            from .unit2control import Unit2ControlGE2E_onnx
+            self.unit2ctrl = Unit2ControlGE2E_onnx(onnx_unit2ctrl, split_map)
+        elif export_onnx:
+            from .unit2control import Unit2ControlGE2E_export
+            self.unit2ctrl = Unit2ControlGE2E_export(n_unit, spk_embed_channels, split_map,
+                                            n_hidden_channels=n_hidden_channels,
+                                            n_spk=n_spk,
+                                            use_pitch_aug=use_pitch_aug,
+                                            use_spk_embed=use_speaker_embed,
+                                            use_embed_conv=use_embed_conv,
+                                            embed_conv_channels=64, conv_stack_middle_size=32)
+        else:
+            from .unit2control import Unit2ControlGE2E
+            self.unit2ctrl = Unit2ControlGE2E(n_unit, spk_embed_channels, split_map,
+                                            n_hidden_channels=n_hidden_channels,
+                                            n_spk=n_spk,
+                                            use_pitch_aug=use_pitch_aug,
+                                            use_spk_embed=use_speaker_embed,
+                                            use_embed_conv=use_embed_conv,
+                                            embed_conv_channels=64, conv_stack_middle_size=32)
         
         # generate static noise
         self.gen = torch.Generator()
         self.gen.manual_seed(noise_seed)
         static_noise_t = (torch.rand([
             win_length*127  # about 5.9sec when sampling_rate=44100 and win_length=2048
-        ], generator=self.gen)*2.0-1.0).to(device)
+        ], generator=self.gen)*2.0-1.0)
         self.register_buffer('static_noise_t', static_noise_t)
         
         # generate minimum-phase windowed sinc signal for harmonic source
         ## TODO: functional
         minphase_wsinc_w = 0.5
-        phase = torch.linspace(-(win_length-1)*minphase_wsinc_w, win_length*minphase_wsinc_w, win_length).to(device)
+        phase = torch.linspace(-(win_length-1)*minphase_wsinc_w, win_length*minphase_wsinc_w, win_length)
         windowed_sinc = torch.sinc(
                 phase
-        ) * torch.blackman_window(win_length).to(device)
+        ) * torch.blackman_window(win_length)
         log_freq_windowed_sinc = torch.log(torch.fft.fft(
             F.pad(windowed_sinc, (win_length//2, win_length//2)),
             n = win_length*2,
@@ -186,15 +260,15 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         static_freq_minphase_wsinc = torch.fft.rfft( torch.fft.ifft(
             torch.exp(torch.fft.fft(ceps_windowed_sinc))
             ).real.roll(ceps_windowed_sinc.shape[0]//2-1)[:ceps_windowed_sinc.shape[0]//2]
-                * torch.hann_window(win_length*2).to(device)[win_length:],
+                * torch.hann_window(win_length*2)[win_length:],
         )
         self.register_buffer('static_freq_minphase_wsinc', static_freq_minphase_wsinc)
         
         ## TODO: necessary?
         minphase_wsinc_w_env = 0.5
         windowed_sinc = torch.sinc(
-            torch.linspace(-(block_size//2-1)*minphase_wsinc_w_env, block_size//2*minphase_wsinc_w_env, block_size//2).to(device)
-        ) * torch.blackman_window(block_size//2).to(device)
+            torch.linspace(-(block_size//2-1)*minphase_wsinc_w_env, block_size//2*minphase_wsinc_w_env, block_size//2)
+        ) * torch.blackman_window(block_size//2)
             
         log_freq_windowed_sinc = torch.log(torch.fft.fft(
             F.pad(windowed_sinc, (block_size//4, block_size//4)),
@@ -219,7 +293,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         
 
     def forward(self, units_frames, f0_frames, volume_frames,
-                spk_id=None, spk_mix_dict=None, aug_shift=None, initial_phase=None, infer=True, **kwargs):
+                spk_id=None, spk_mix=None, aug_shift=None, initial_phase=None, infer=True, **kwargs):
         '''
             units_frames: B x n_frames x n_unit
             f0_frames: B x n_frames x 1
@@ -243,13 +317,13 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         if initial_phase is not None:
             x += initial_phase.to(x) / 2 / torch.pi
         x = x - torch.round(x)
-        x = x.to(f0) 
+        x = x.to(f0)
         
-        phase_frames = 2 * torch.pi * x[:, ::self.block_size, :]
+        phase_frames = 2. * torch.pi * x[:, ::self.block_size, :]
         
         # parameter prediction
         ctrls, hidden = self.unit2ctrl(units_frames, f0_frames, phase_frames, volume_frames,
-                                       spk_id=spk_id, spk_mix_dict=spk_mix_dict, aug_shift=aug_shift)
+                                       spk_id=spk_id, spk_mix=spk_mix, aug_shift=aug_shift)
         
         if self.use_f0_offset:
             # apply predicted f0 offset
@@ -364,4 +438,4 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             window = self.window,
             center = True)
         
-        return signal, hidden, ((combtooth_stft, noise_stft), f0)
+        return signal

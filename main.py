@@ -4,16 +4,13 @@ import librosa
 import argparse
 import numpy as np
 import soundfile as sf
-# import pyworld as pw
-# import parselmouth
 import hashlib
 import torchaudio
 from ast import literal_eval
 from slicer import Slicer
-from modules.vocoder import load_model
+from modules.vocoder import load_model, load_onnx_model
 from modules.extractors import F0Extractor, VolumeExtractor, UnitsEncoder
 from modules.extractors.common import upsample
-# from enhancer import Enhancer
 from tqdm import tqdm
 
 def parse_args(args=None, namespace=None):
@@ -95,14 +92,6 @@ def parse_args(args=None, namespace=None):
         default=0,
         help="key changed (number of semitones) | default: 0",
     )
-    # parser.add_argument(
-    #     "-e",
-    #     "--enhance",
-    #     type=str,
-    #     required=False,
-    #     default='true',
-    #     help="true or false | default: true",
-    # )
     parser.add_argument(
         "-pe",
         "--pitch_extractor",
@@ -143,14 +132,14 @@ def parse_args(args=None, namespace=None):
         default=-60,
         help="response threhold (dB) | default: -60",
     )
-    # parser.add_argument(
-    #     "-eak",
-    #     "--enhancer_adaptive_key",
-    #     type=str,
-    #     required=False,
-    #     default=0,
-    #     help="adapt the enhancer to a higher vocal range (number of semitones) | default: 0",
-    # )
+    parser.add_argument(
+        "-op",
+        "--onnx_providers",
+        type=str,
+        required=False,
+        default="CPUExecutionProvider",
+        help="execution provider names of onnxruntime, separate by comma | default: CPUExecutionProvider"
+    )
     return parser.parse_args(args=args, namespace=namespace)
 
     
@@ -193,7 +182,14 @@ if __name__ == '__main__':
         device = 'cuda' if torch.cuda.is_available() else 'cpu'
     
     # load ddsp model
-    model, args, spk_info = load_model(cmd.model_path, device=device)
+    model_path_splitext = os.path.splitext(cmd.model_path)
+    if len(model_path_splitext) < 2:
+        raise ValueError(f" [x] no extension found in filename, skip process: {cmd.model_path}")
+    if model_path_splitext[1] == '.onnx':
+        model, args, spk_info = load_onnx_model(cmd.model_path, providers=cmd.onnx_providers.split(','))
+        device = 'cpu'  # TODO: change device by onnx session providers
+    else:
+        model, args, spk_info = load_model(cmd.model_path, device=device)
     
     # load input
     audio, sample_rate = librosa.load(cmd.input, sr=None)
@@ -249,18 +245,7 @@ if __name__ == '__main__':
         f0[~f0_uv] = f0[~f0_uv] * float(cmd.intonation) ** (((f0[~f0_uv] - float(cmd.f0_min))/(float(cmd.f0_max) - float(cmd.f0_min)))*(float(cmd.f0_max) - float(cmd.intonation_base)) / float(cmd.f0_max))
         
     if not interpolate_f0:
-        # set unvoiced f0 to fixed samplerate/blocksize*2
-        # f0[f0_uv] = sample_rate/hop_size*2.
-        # f0[f0_uv] = args.data.f0_min*.3
-        # f0[f0_uv] = sample_rate/hop_size
-        # f0[f0_uv] = 1.
-        # f0[f0_uv] = args.data.sampling_rate/args.model.win_length
-        # f0[f0_uv] = args.data.sampling_rate/args.data.block_size
         f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(args.data.sampling_rate/args.data.block_size) + float(args.data.sampling_rate/args.data.block_size)
-        # f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(args.data.f0_min) + float(args.data.sampling_rate/args.data.block_size)
-        # f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(args.data.f0_min)*.2 + float(args.data.f0_min)*.2
-        # f0[f0_uv] = torch.rand_like(f0[f0_uv])*(sample_rate/hop_size*.5) + (sample_rate/hop_size)
-        # f0[f0_uv] = torch.rand_like(f0[f0_uv])*(sample_rate/hop_size) + (sample_rate/hop_size*.5)
     
     # extract volume 
     print('Extracting the volume envelope of the input audio...')
@@ -293,22 +278,42 @@ if __name__ == '__main__':
     # load speaker embed
     use_spk_embed = False
     if args.model.use_speaker_embed is not None and cmd.spk_embed != "None":
-        if cmd.spk_embed != "None" or spk_info is None:
-            spk_embed = np.load(cmd.spk_embed, allow_pickle=True)[cmd.spk_id].item()['spk_embed']
+        # speaker embed or mix-speaker dictionary
+        spk_mix_dict = literal_eval(cmd.spk_mix_dict)
+        if spk_mix_dict is not None:
+            print('Mix-speaker mode')
+            if cmd.spk_embed != "None" or spk_info is None:
+                spk_id = torch.stack([
+                    torch.from_numpy(np.load(cmd.spk_embed, allow_pickle=True)[str(k)].item()['spk_embed'][np.newaxis, :]).float().to(device)
+                    for k in spk_mix_dict.keys()
+                ])
+            else:
+                spk_id = torch.stack([
+                    spk_info[str(k)].item()['spk_embed'][np.newaxis, :]
+                    for k in spk_mix_dict.keys()
+                ])
+            spk_mix = torch.tensor([[[float(v) for v in spk_mix_dict.values()]]]).transpose(-1, 0)
         else:
-            spk_embed = spk_info[cmd.spk_id].item()['spk_embed']
-        spk_embed = torch.from_numpy(spk_embed).float().to(device).unsqueeze(0)
+            print('Speaker ID: '+ str(int(cmd.spk_id)))
+            if cmd.spk_embed != "None" or spk_info is None:
+                spk_id = torch.from_numpy(np.load(cmd.spk_embed, allow_pickle=True)[cmd.spk_id].item()['spk_embed'][np.newaxis, :]).float().to(device).unsqueeze(0)
+            else:
+                spk_id = spk_info[cmd.spk_id].item()['spk_embed'][np.newaxis, :].unsqueeze(0)
+            spk_mix = torch.tensor([[[1.]]])
         use_spk_embed = True
-        spk_mix_dict = None # TODO: impl
     else:
         # speaker id or mix-speaker dictionary
         spk_mix_dict = literal_eval(cmd.spk_mix_dict)
         if spk_mix_dict is not None:
             print('Mix-speaker mode')
-            spk_id = torch.LongTensor(np.array([int(k) for k in spk_mix_dict.keys()])).to(device)
+            spk_id = torch.LongTensor(np.array([[int(k) for k in spk_mix_dict.keys()]]))
+            spk_mix = torch.tensor([[float(v) for v in spk_mix_dict.values()]])
         else:
             print('Speaker ID: '+ str(int(cmd.spk_id)))
-            spk_id = torch.LongTensor(np.array([[int(cmd.spk_id)]])).to(device)
+            spk_id = torch.LongTensor(np.array([[int(cmd.spk_id)]]))
+            spk_mix = torch.tensor([[1.]])
+    spk_id = spk_id.to(device)
+    spk_mix = spk_mix.to(device)
             
     units_ratio = (args.data.block_size / args.data.sampling_rate) / (args.data.encoder_hop_size / args.data.encoder_sample_rate)
     units_sample_ratio = args.data.sampling_rate / args.data.encoder_sample_rate
@@ -325,65 +330,22 @@ if __name__ == '__main__':
         for segment in tqdm(segments):
             start_frame = segment[0]
             seg_input = torch.from_numpy(segment[1]).float().unsqueeze(0).to(device)
-            if args.model.spec_in_stack:
-                spec = torchaudio.functional.spectrogram(
-                        seg_input,
-                        pad=0,
-                        window=torch.hann_window(args.data.block_size*2).to(seg_input),
-                        n_fft=args.data.block_size*2,
-                        hop_length=args.data.block_size,
-                        win_length=args.data.block_size*2,
-                        power=1,
-                        normalized=False).transpose(2, 1)[:, 1:, :args.data.block_size//2]
-                if args.model.distil_units_layers is None:
-                    seg_units = spec
-                else:
-                    seg_units = model.unit2ctrl.units_distillator(spec.transpose(2, 1)).transpose(2, 1)
-            # elif not args.model.distilled_stack:
-            #     seg_units = units_encoder.encode(seg_input, sample_rate, hop_size)
-            elif args.model.audio_in_stack:
-                seg_audio = seg_input.view(seg_input.shape[0], -1, args.data.block_size)
-                if args.model.distil_units_layers is None:
-                    seg_units = seg_audio
-                else:
-                    # seg_units = model.unit2ctrl.units_distillator(seg_audio.transpose(2, 1)).transpose(2, 1)
-                    downsampled_audio = seg_input[:, ::downsamples]
-                    # alignment
-                    fold_step = int(downsampled_units_sample_ratio*args.data.encoder_hop_size)
-                    # audio = torch.nn.functional.pad(downsampled_audio, (fold_step//2, fold_step//2)).unfold(1, args.data.encoder_hop_size, fold_step-1).flatten(1).unsqueeze(-1)
-                    # audio = torch.nn.functional.pad(downsampled_audio, (0, fold_step)).unfold(1, args.data.encoder_hop_size, fold_step-1).flatten(1).unsqueeze(-1)
-                    audio = downsampled_audio.unfold(1, args.data.encoder_hop_size, fold_step).flatten(1).unsqueeze(-1)
-                    units = model.unit2ctrl.units_distillator(audio.transpose(2, 1))
-                    # n_frames = data['audio'].size(1) // args.data.block_size + 1
-                    n_frames = seg_input.size(1) // args.data.block_size
-                    index = torch.clamp(torch.round(units_ratio * torch.arange(n_frames).to(units)).long(), max = units.size(1) - 1)
-                    repeats = [units.size(0), 1, units.size(-1)]
-                    index = index.unsqueeze(0).unsqueeze(-1).repeat(repeats)
-                    seg_units = torch.gather(units, 1, index)
-            else:
-                seg_units = units_encoder.encode(seg_input, sample_rate, hop_size)
+            seg_units = units_encoder.encode(seg_input, sample_rate, hop_size)
                     
            
             seg_f0 = f0[:, start_frame : start_frame + seg_units.size(1), :]
             seg_volume = volume[:, start_frame : start_frame + seg_units.size(1), :]
             
-            if not use_spk_embed:
-                seg_output, _, (s_h, s_n) = model(seg_units, seg_f0, seg_volume, spk_id=spk_id, spk_mix_dict=spk_mix_dict)
-            else:
-                seg_output, _, (s_h, s_n) = model(seg_units, seg_f0, seg_volume, spk_id=spk_embed, spk_mix_dict=spk_mix_dict)
+            
+            seg_output = model(seg_units, seg_f0, seg_volume, spk_id=spk_id, spk_mix=spk_mix)
+            
             seg_output *= mask[:, start_frame * args.data.block_size : (start_frame + seg_units.size(1)) * args.data.block_size]
             
-            # if cmd.enhance == 'true':
-            #     seg_output, output_sample_rate = enhancer.enhance(
-            #                                                 seg_output, 
-            #                                                 args.data.sampling_rate, 
-            #                                                 seg_f0, 
-            #                                                 args.data.block_size, 
-            #                                                 adaptive_key = cmd.enhancer_adaptive_key)
-            # else:
             output_sample_rate = args.data.sampling_rate
             
+            
             seg_output = seg_output.squeeze().cpu().numpy()
+            
             
             silent_length = round(start_frame * args.data.block_size * output_sample_rate / args.data.sampling_rate) - current_length
             if silent_length >= 0:
