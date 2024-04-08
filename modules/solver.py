@@ -2,9 +2,10 @@ import os
 import time
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch import autocast
 from torch.cuda.amp import GradScaler
-import torch.nn.functional as F
+from tqdm import tqdm
 
 from modules.logger.saver import Saver
 from modules.logger import utils
@@ -26,50 +27,50 @@ def test(args, model, loss_func, loader_test, saver):
     
     # run
     with torch.no_grad():
-        for bidx, data in enumerate(loader_test):
-            fn = data['name'][0].lstrip("data/test/")
-            print('--------')
-            print('{}/{} - {}'.format(bidx, num_batches, fn))
+        print()
+        with tqdm(loader_test, desc="test") as pbar:
+            for bidx, data in enumerate(pbar, start=1):
+                fn = data['name'][0].lstrip("data/test/")
 
-            # unpack data
-            for k in data.keys():
-                if k != 'name':
-                    data[k] = data[k].to(args.device)
-            print('>>', data['name'][0])
+                # unpack data
+                for k in data.keys():
+                    if k != 'name':
+                        data[k] = data[k].to(args.device)
+                
+                units = data['units']
+
+                # forward
+                st_time = time.time()
+                signal = model(units, data['f0'], data['volume'], data[spk_id_key])
+                ed_time = time.time()
+
+                # crop
+                min_len = np.min([signal.shape[1], data['audio'].shape[1]])
+                signal        = signal[:,:min_len]
+                data['audio'] = data['audio'][:,:min_len]
+
+                # RTF
+                run_time = ed_time - st_time
+                song_time = data['audio'].shape[-1] / args.data.sampling_rate
+                rtf = run_time / song_time
+                rtf_all.append(rtf)
             
-            units = data['units']
+                # loss
+                loss = loss_func(signal, data['audio'])
 
-            # forward
-            st_time = time.time()
-            signal = model(units, data['f0'], data['volume'], data[spk_id_key])
-            ed_time = time.time()
+                test_loss += loss.item()
 
-            # crop
-            min_len = np.min([signal.shape[1], data['audio'].shape[1]])
-            signal        = signal[:,:min_len]
-            data['audio'] = data['audio'][:,:min_len]
-
-            # RTF
-            run_time = ed_time - st_time
-            song_time = data['audio'].shape[-1] / args.data.sampling_rate
-            rtf = run_time / song_time
-            print('RTF: {}  | {} / {}'.format(rtf, run_time, song_time))
-            rtf_all.append(rtf)
-           
-            # loss
-            loss = loss_func(signal, data['audio'])
-
-            test_loss += loss.item()
-
-            # log
-            saver.log_audio({fn+'/gt.wav': data['audio'], fn+'/pred.wav': signal})
+                # log
+                saver.log_audio({fn+'/gt.wav': data['audio'], fn+'/pred.wav': signal})
+                
+                pbar.set_description(f'{bidx}/{num_batches}: {fn}')
+                pbar.set_postfix({'loss': loss.item(), 'RTF': rtf})
             
     # report
     test_loss /= num_batches
     
     # check
-    print(' [test_loss] test_loss:', test_loss)
-    print(' Real Time Factor', np.mean(rtf_all))
+    print(f' [loss] {test_loss} / Real Time Factor: {np.mean(rtf_all)}')
     return test_loss
 
 
@@ -293,7 +294,7 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
     
     # model size
     params_count = utils.get_network_params_amount({'model': model})
-    saver.log_info('--- model size (trainable) ---')
+    saver.log_info('--- model size ---')
     saver.log_info(params_count)
     saver.log_info('======= start training =======')
     for epoch in range(args.train.epochs):
@@ -374,18 +375,19 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
                 saver.save_model(model, optimizer_save, postfix=f'{saver.global_step}', states=states)
 
                 # run testing set
-                test_loss = test(args, model, loss_func, loader_test, saver)
+                if loader_test is not None:
+                    test_loss = test(args, model, loss_func, loader_test, saver)
                 
-                # log loss
-                saver.log_info(
-                    ' --- <validation> --- \nloss: {:.3f}. '.format(
-                        test_loss,
+                    # log loss
+                    saver.log_info(
+                        ' --- <validation> --- \nloss: {:.3f}. '.format(
+                            test_loss,
+                        )
                     )
-                )
-    
-                saver.log_value({
-                    'validation/loss': test_loss
-                })
+        
+                    saver.log_value({
+                        'validation/loss': test_loss
+                    })
                 
                 model.train()
                 

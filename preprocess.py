@@ -69,7 +69,12 @@ if __name__ == '__main__':
     
     # get dataset
     ds_train = get_datasets(os.path.join(args.data.dataset_path, 'train.csv'))
-    ds_test = get_datasets(os.path.join(args.data.dataset_path, 'test.csv'))
+    
+    test_csv = os.path.join(args.data.dataset_path, 'test.csv')
+    if os.path.isfile(test_csv):
+        ds_test = get_datasets(test_csv)
+    else:
+        ds_test = None
     
     
     # process speaker embed
@@ -78,7 +83,8 @@ if __name__ == '__main__':
         
     # process units, f0 and volume
     preprocess_main(args.data.dataset_path, ds_train, params=params)
-    preprocess_main(args.data.dataset_path, ds_test, params=params)
+    if ds_test is not None:
+        preprocess_main(args.data.dataset_path, ds_test, params=params)
     
     os.makedirs(args.env.expdir, exist_ok=True)
     
