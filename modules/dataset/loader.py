@@ -251,10 +251,9 @@ class AudioCrop:
 
 
 def get_data_loaders(args):
-    ds_train = get_datasets(os.path.join(args.data.dataset_path, 'train.csv'))
-    ds_test = get_datasets(os.path.join(args.data.dataset_path, 'test.csv'))
-    
     loaders = {}
+    
+    ds_train = get_datasets(os.path.join(args.data.dataset_path, 'train.csv'))
     
     loaders['train'] = DataLoader(
         AudioDataset(
@@ -276,23 +275,29 @@ def get_data_loaders(args):
         pin_memory=True if args.train.cache_device=='cpu' else False
     )
     
-    loaders['test'] = DataLoader(
-        AudioDataset(
-            root_path=args.data.dataset_path,
-            metadatas=ds_test,
-            crop_duration=args.data.duration,
-            hop_size=args.data.block_size,
-            sampling_rate=args.data.sampling_rate,
-            whole_audio=True,
-            device=args.train.cache_device,
-            use_aug=False,
-            use_spk_embed=args.model.use_speaker_embed,
-            units_only=args.train.only_u2c_stack),
-        batch_size=1,
-        shuffle=False,
-        num_workers=0,
-        pin_memory=True if args.train.cache_device=='cpu' else False
-    )
+    test_csv = os.path.join(args.data.dataset_path, 'test.csv')
+    if os.path.isfile(test_csv):
+        ds_test = get_datasets()
+        
+        loaders['test'] = DataLoader(
+            AudioDataset(
+                root_path=args.data.dataset_path,
+                metadatas=ds_test,
+                crop_duration=args.data.duration,
+                hop_size=args.data.block_size,
+                sampling_rate=args.data.sampling_rate,
+                whole_audio=True,
+                device=args.train.cache_device,
+                use_aug=False,
+                use_spk_embed=args.model.use_speaker_embed,
+                units_only=args.train.only_u2c_stack),
+            batch_size=1,
+            shuffle=False,
+            num_workers=0,
+            pin_memory=True if args.train.cache_device=='cpu' else False
+        )
+    else:
+        loaders['test'] = None
     
     return loaders
 
