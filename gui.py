@@ -235,7 +235,7 @@ class GUI:
         # 界面布局
         layout = [
             [sg.Frame(layout=[
-                [sg.Input(key='sg_model', default_text='exp\\multi_speaker\\model_300000.pt'),
+                [sg.Input(key='sg_model', default_text='models\\vctk-partial\\model_0.pt'),
                  sg.FileBrowse(i18n('选择模型文件'), key='choose_model')]
             ], title=i18n('模型：.pt格式(自动识别同目录下config.yaml)')),
                 sg.Frame(layout=[
