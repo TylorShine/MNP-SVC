@@ -116,11 +116,12 @@ class SvcDDSP:
             float(f0_max))
         f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
-        f0 = f0 * 2 ** (float(pitch_adjust) / 12)
+        f0_uv = f0 == 0
+        f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(self.args.data.sampling_rate/self.args.data.block_size) + float(self.args.data.sampling_rate/self.args.data.block_size)
+        f0[~f0_uv] = f0[~f0_uv] * 2 ** (float(pitch_adjust) / 12)
         
         # intonation curve
         if intonation != 1.0:
-            f0_uv = f0 == 0
             f0[~f0_uv] = f0[~f0_uv] * intonation ** (((f0[~f0_uv] - f0_min)/(f0_max - f0_min))*(float(f0_max) - intonation_base) / float(f0_max))
 
         # extract volume
@@ -292,7 +293,7 @@ class GUI:
         ]
 
         # 创造窗口
-        self.window = sg.Window('DDSP - GUI', layout, finalize=True)
+        self.window = sg.Window('MNP-SVC - GUI', layout, finalize=True)
         self.window['spk_id'].bind('<Return>', '')
         self.window['samplerate'].bind('<Return>', '')
         self.event_handler()

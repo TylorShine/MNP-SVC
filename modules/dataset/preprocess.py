@@ -112,6 +112,8 @@ def preprocess_main(root_path: str, dataset: dict[str, dict[str, str]], params: 
         for path in tqdm(dataset.keys(), desc='Extract f0'):
             audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
             f0 = f0_extractor.extract(audio, device=params.common['device'])
+            f0_uv = f0 == 0
+            f0[f0_uv] = np.random.rand(*f0[f0_uv].shape)*float(params.common['sample_rate']/params.common['block_size']) + float(params.common['sample_rate']/params.common['block_size'])
             # f0_path = os.path.join(f0_dir, os.path.relpath(path, start=data_dir))
             f0_path = os.path.join(f0_dir, os.path.relpath(path, start='data'))
             os.makedirs(os.path.dirname(f0_path), exist_ok=True)

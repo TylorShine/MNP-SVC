@@ -10,10 +10,10 @@ class UnitsEncoder:
         
         is_loaded_encoder = False
         if encoder == 'wavlmbase':
-            self.model = Audio2WavLM(encoder_ckpt, device=device, extract_layers=extract_layers)
+            self.model = Audio2WavLM(encoder_ckpt, device=device, extract_layer=max(max(extract_layers)), extract_layers=extract_layers)
             is_loaded_encoder = True
         if encoder == 'dpwavlmbase':
-            self.model = Audio2DPWavLM(encoder_ckpt, device=device, extract_layers=extract_layers)
+            self.model = Audio2DPWavLM(encoder_ckpt, device=device, extract_layer=max(max(extract_layers)), extract_layers=extract_layers)
             is_loaded_encoder = True
         if not is_loaded_encoder:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
@@ -90,7 +90,9 @@ class Audio2WavLM():
                 audio_in = torch.nn.functional.layer_norm(audio, audio.shape)
             else:
                 audio_in = audio
-            if self.extract_layers is not None:
+            if self.extract_layer == 0:
+                units = self.model.extract_features(audio_in, output_layer=None, ret_conv=True)[0]
+            elif self.extract_layers is not None:
                 layers = self.model.extract_features(audio_in, output_layer=self.extract_layer, ret_layer_results=True)[0][1]
                 units = []
                 for accum_layers in self.extract_layers:
