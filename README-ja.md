@@ -49,6 +49,7 @@ DDSP-SVCとのAIモデルの構造の違いは、大まかに:
 1. [WinPython](https://winpython.github.io/) のダウンロード
 1. ダウンロードしたファイルの展開
 1. Python venv 環境を作成し、依存パッケージをインストール
+1. 事前学習モデルのダウンロード
 
 を実行します.  
 次回からは、このスクリプトを実行して起動したコンソールを使用できます。
@@ -56,6 +57,7 @@ DDSP-SVCとのAIモデルの構造の違いは、大まかに:
 
 ### (その他のOSのユーザー向け) 手動セットアップ
 
+#### 1-1. pip で依存関係をインストール
 事前にPythonを実行できる環境を用意し(Windowsの方は[WinPython](https://winpython.github.io/)など。作者もこちらでvenvで仮想環境を作成して開発しています。)、はじめに [PyTorch 公式ウェブサイト](https://pytorch.org/) の手順でお使いの環境にあったPyTorchをインストールしてください。  
 その後:
 
@@ -68,7 +70,7 @@ pip install -r requirements/main.txt
 作者は python 3.11.8/3.12.2 (windows) + cuda 11.8 + torch 2.2.1 のみで実行を確認しています。古すぎたり新しすぎるバージョンでは動かないかもしれません。
 
 
-## 2. 📝モデルの設定
+#### 1-2. 事前学習モデルのダウンロード
 
 事前学習モデルをダウンロードします。
 - 特徴抽出器:
@@ -84,10 +86,11 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/)  ([pytorch_mode
 
 - MNP-SVC 事前学習モデル:
 
-  [事前学習モデル](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt)をダウンロードします。後で使うのでどこに保存したか覚えておいてください。
+  [事前学習モデル](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt) をダウンロードします。後で使うのでどこに保存したか覚えておいてください。
+  - 必要に応じて [一部の畳み込み層のみの事前学習モデル](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt) も使用可能です。こちらは声質や話者の特徴分布が学習されていないものです。
 
 
-## 3. 🛠️事前処理
+## 2. 🛠️事前処理
 
 すべてのデータセット (音声ファイル) を`dataset/audio`フォルダ以下に配置します。 
 
@@ -129,10 +132,10 @@ python sortup.py -c configs/combsub-mnp.yaml
 python preprocess.py -c configs/combsub-mnp.yaml
 ```
 
-を実行します。この事前処理が終わったら、先程ダウンロードした MNP-SVC 事前学習モデル (`model_0.pt`) を `dataset/exp/combsub-mnp/` 以下に配置します。
+を実行します。この事前処理が終わったら、先程ダウンロードした MNP-SVC 事前学習モデル (`model_0.pt`、もしくは`launch.bat`により自動でダウンロードされた `models/vctk-partial/model_0.pt`) を `dataset/exp/combsub-mnp/` 以下に配置します。
 
 
-## 4. 🎓️学習
+## 3. 🎓️学習
 
 ```bash
 python train.py -c configs/combsub-mnp.yaml
@@ -145,7 +148,7 @@ python train.py -c configs/combsub-mnp.yaml
 モデルのファインチューニングも同じように行えます。一度学習を止めて、新しいデータセットをもう一度事前処理し、バッチサイズや学習率をチューニングするなどしてから同コマンドを実行してください。
 
 
-## 5. 📉可視化
+## 4. 📉可視化
 
 ```bash
 # 学習経過を tensorboard で確認する
@@ -155,7 +158,7 @@ tensorboard --logdir=dataset/exp
 出力サンプルは初回のテスト後に見えます。
 
 
-## 6. 🗃️非リアルタイムVC
+## 5. 🗃️非リアルタイムVC
 
 ```bash
 python main.py -i <入力wavファイル> -m <model_num.pt> -o <出力先wavファイル> -k <キーシフト> -into <抑揚カーブ> -id <話者ID>
@@ -173,7 +176,7 @@ python main.py -h
 で確認してください。
 
 
-## 7. 🎤リアルタイムVC
+## 6. 🎤リアルタイムVC
 
 以下のコマンドで簡易GUIを実行します:
 
@@ -184,7 +187,7 @@ python gui.py
 フロントエンドは移動窓、クロスフェード、SOLAベースの切継ぎなどを使用し、低遅延と低負荷を維持しながら品質をノンリアルタイムと近づけるようにしています。
 
 
-## 8. ONNXへのエクスポート
+## 7. 📦️ONNXへのエクスポート
 
 以下のコマンドでONNX形式にエクスポートします:
 
@@ -197,16 +200,16 @@ python -m tools.export_onnx -i <model_num.pt>
 エクスポートされたonnxファイルは、リアルタイムVCや非リアルタイムVCで同じように使用できます。今のところCPU推論のみの対応です。
 
 
-## 9. ⚖️ライセンス
+## 8. ⚖️ライセンス
 [MIT License](LICENSE) です。
 
 
-## 10. ✅️TODOs
+## 9. ✅️TODOs
 - [x] ONNX 形式にエクスポートするコードの追加
 - [ ] WebUI の作成
 
 
-## 11. 🙏謝辞
+## 10. 🙏謝辞
 
 - [ddsp](https://github.com/magenta/ddsp)
 

@@ -46,6 +46,7 @@ Simply double-clicking `launch.bat`. This script doing:
 1. Download the [WinPython](https://winpython.github.io/)
 1. Extract downloaded archive
 1. Make the venv python environment and install require packages
+1. Download pre-trained models
 
 when first time execution.  
 For the next time, you can launch this script and use this console.
@@ -53,18 +54,17 @@ For the next time, you can launch this script and use this console.
 
 ### (for other OS users) Manual setup
 
-We recommend first installing PyTorch from the [official website](https://pytorch.org/), then run:
+#### 1-1. Install dependencies with pip
+We recommend first installing the PyTorch from the [official website](https://pytorch.org/). then run:
 
 ```bash
 pip install -r requirements/main.txt
 ```
 
-NOTE : I only test the code using python 3.11.8/3.12.2 (windows) + cuda 11.8 + torch 2.2.1, too new or too old dependencies may not work.
+NOTE: I only test the code using python 3.11.8 (windows) / 3.12.1 (Ubuntu) + cuda 11.8 + torch 2.2.2, too new or too old dependencies may not work.
 
 
-## 2. 📝Configuring your model
-
-### 2-1. Download pre-trained models
+#### 1-2. Download pre-trained models
 - Feature Encoders:
 
   1. Download the pre-trained [DPWavLM](https://huggingface.co/pyf98/DPHuBERT/blob/main/DPWavLM-sp0.75.pth) encoder and put it under `models/pretrained/dphubert` folder.
@@ -78,10 +78,11 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/) speaker embed e
 
 - MNP-SVC pre-trained model:
 
-  Download the (only feature conv) pre-trained [model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt). Use this later, keep in mind.
+  Download the [pre-trained model](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt). Use this later, keep in mind.
+  - [pre-trained only few conv layers model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt) is also available. This model was not trained the voice characters, speaker distributions etc.
 
 
-## 3. 🛠️Preprocessing
+## 2. 🛠️Preprocessing
 
 Put all the dataset (audio clips) in the below directory: `dataset/audio`.
 
@@ -122,10 +123,10 @@ After that, then run
 python preprocess.py -c configs/combsub-mnp.yaml
 ```
 
-After done, put a MNP-SVC pre-trained model (`model_0.pt`) to under `dataset/exp/combsub-mnp/`.
+After done, put a MNP-SVC pre-trained model (`model_0.pt`. or `models/vctk-partial/model_0.pt` that automatically downloaded by `launch.bat`) to under `dataset/exp/combsub-mnp/`.
 
 
-## 4. 🎓️Training
+## 3. 🎓️Training
 
 ```bash
 python train.py -c configs/combsub-mnp.yaml
@@ -136,7 +137,7 @@ You can safely interrupt training, then running the same command line will resum
 You can also finetune the model if you interrupt training first, then re-preprocess the new dataset or change the training parameters (batchsize, lr etc.) and then run the same command line.
 
 
-## 5. 📉Visualization
+## 4. 📉Visualization
 
 ```bash
 # check the training status using tensorboard
@@ -146,7 +147,7 @@ tensorboard --logdir=exp
 Test audio samples will be visible in TensorBoard after the first validation.
 
 
-## 6. 🗃️Non-real-time VC
+## 5. 🗃️Non-real-time VC
 
 ```bash
 python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange> -into <intonation curve> -id <speaker_id>
@@ -162,7 +163,7 @@ python main.py -h
 ```
 
 
-## 7. 🎤Real-time VC
+## 6. 🎤Real-time VC
 
 Start a simple GUI with the following command:
 
@@ -173,7 +174,7 @@ python gui.py
 The front-end uses technologies such as sliding window, cross-fading, SOLA-based splicing and contextual semantic reference, which can achieve sound quality close to non-real-time synthesis with low latency and resource occupation.
 
 
-## 8. Export to ONNX
+## 7. 📦️Export to ONNX
 
 Execute following command:
 
@@ -186,16 +187,16 @@ Other options can be found in `python -m tools.export_onnx -h`.
 The exported onnx files can be used in the same way for real-time and non-real-time VC. For now, only CPU inference is supported.
 
 
-## 9. ⚖️License
+## 8. ⚖️License
 [MIT License](LICENSE)
 
 
-## 10. ✅️TODOs
+## 9. ✅️TODOs
 - [x] Export to ONNX
 - [ ] Make WebUI
 
 
-## 11. 🙏Acknowledgement
+## 10. 🙏Acknowledgement
 
 - [ddsp](https://github.com/magenta/ddsp)
 
