@@ -11,7 +11,6 @@ from modules.logger.saver import Saver
 from modules.logger import utils
 
 def test(args, model, loss_func, loader_test, saver):
-    print(' [*] testing...')
     model.eval()
 
     # losses
@@ -27,9 +26,8 @@ def test(args, model, loss_func, loader_test, saver):
     
     # run
     with torch.no_grad():
-        print()
         with tqdm(loader_test, desc="test") as pbar:
-            for bidx, data in enumerate(pbar, start=1):
+            for data in pbar:
                 fn = data['name'][0].lstrip("data/test/")
 
                 # unpack data
@@ -63,14 +61,12 @@ def test(args, model, loss_func, loader_test, saver):
                 # log
                 saver.log_audio({fn+'/gt.wav': data['audio'], fn+'/pred.wav': signal})
                 
-                pbar.set_description(f'{bidx}/{num_batches}: {fn}')
+                pbar.set_description(fn)
                 pbar.set_postfix({'loss': loss.item(), 'RTF': rtf})
             
     # report
     test_loss /= num_batches
     
-    # check
-    print(f' [loss] {test_loss} / Real Time Factor: {np.mean(rtf_all)}')
     return test_loss
 
 
@@ -380,7 +376,7 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
                 
                     # log loss
                     saver.log_info(
-                        ' --- <validation> --- \nloss: {:.3f}. '.format(
+                        ' --- <validation> loss: {:.3f}. '.format(
                             test_loss,
                         )
                     )
