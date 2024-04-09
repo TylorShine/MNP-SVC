@@ -80,6 +80,9 @@ class Unit2ControlGE2E(nn.Module):
                         nn.GELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
+                nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
+                nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
+                nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Linear(spk_embed_channels, n_hidden_channels)
         else:
             if use_embed_conv:
@@ -91,6 +94,9 @@ class Unit2ControlGE2E(nn.Module):
                         nn.GELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
+                nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
+                nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
+                nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Embedding(n_spk, n_hidden_channels)
         if use_pitch_aug:
             self.aug_shift_embed = nn.Linear(1, n_hidden_channels, bias=False)
@@ -106,6 +112,8 @@ class Unit2ControlGE2E(nn.Module):
                     nn.GELU(),
                     GRN(conv_stack_middle_size)),
                 nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+        nn.init.normal_(self.stack[-1].weight, 0, 0.01)
+        nn.init.constant_(self.stack[-1].bias, 0)
 
         # transformer
         self.decoder = ConvNeXtV2LikeEncoder(
@@ -284,6 +292,7 @@ class Unit2ControlStackOnly(nn.Module):
                     nn.GELU(),
                     GRN(conv_stack_middle_size)))
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+        nn.init.kaiming_normal_(self.stack[0].weight)
         
     def forward(self, units):
         return self.stack(units.transpose(2, 1))
