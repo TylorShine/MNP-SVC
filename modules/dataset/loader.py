@@ -277,7 +277,7 @@ def get_data_loaders(args):
     
     test_csv = os.path.join(args.data.dataset_path, 'test.csv')
     if os.path.isfile(test_csv):
-        ds_test = get_datasets()
+        ds_test = get_datasets(test_csv)
         
         loaders['test'] = DataLoader(
             AudioDataset(
