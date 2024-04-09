@@ -87,7 +87,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/)  ([pytorch_mode
 - MNP-SVC 事前学習モデル:
 
   [事前学習モデル](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt) をダウンロードします。後で使うのでどこに保存したか覚えておいてください。
-  - 必要に応じて [一部の畳み込み層のみの事前学習モデル](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt) も使用可能です。こちらは声質や話者の特徴分布が学習されていないものです。
+  - 必要に応じて [一部の畳み込み層のみの事前学習モデル](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.1/model_0.pt) も使用可能です。こちらは声質や話者の特徴分布が学習されていないものです。
 
 
 ## 2. 🛠️事前処理

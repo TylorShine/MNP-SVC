@@ -79,7 +79,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/) speaker embed e
 - MNP-SVC pre-trained model:
 
   Download the [pre-trained model](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt). Use this later, keep in mind.
-  - [pre-trained only few conv layers model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.0/model_0.pt) is also available. This model was not trained the voice characters, speaker distributions etc.
+  - [pre-trained only few conv layers model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.1/model_0.pt) is also available. This model was not trained the voice characters, speaker distributions etc.
 
 
 ## 2. 🛠️Preprocessing
@@ -156,7 +156,7 @@ python main.py -i <input.wav> -m <model_file.pt> -o <output.wav> -k <keychange> 
 keychange: semitones  
 intonation curve: 1.0 means follow original pitch (default), more small to flat (calm), more large to dynamic (excite)  
 
-Other options about the f0 extractor and response threhold，see:
+Other options about the f0 extractor and response threshold，see:
 
 ```bash
 python main.py -h
