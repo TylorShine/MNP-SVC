@@ -17,7 +17,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn import LayerNorm
-from modules import (
+from .modules import (
     Fp32GroupNorm,
     Fp32LayerNorm,
     GradMultiply,
