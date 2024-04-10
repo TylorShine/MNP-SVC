@@ -1,5 +1,4 @@
 import PySimpleGUI as sg
-import sounddevice as sd
 import torch, librosa, threading, pickle
 import numpy as np
 from torch.nn import functional as F
@@ -7,8 +6,12 @@ from torchaudio.transforms import Resample
 from modules.vocoder import load_model, load_onnx_model
 from modules.extractors import F0Extractor, VolumeExtractor, UnitsEncoder
 from modules.extractors.common import upsample
+import sys
+import argparse
 import time
 import gui_locale
+if len(sys.argv) <= 1:
+    import sounddevice as sd
 
 flag_vc = False
 
@@ -43,6 +46,9 @@ class SvcDDSP:
         self.enhancer_ckpt = None
         self.spk_info = None
         self.spk_embeds = None
+        self.pitch_extractor = None
+        self.select_pitch_extractor = None
+        self.pitch_extractor_sample_rate = None
 
     def update_model(self, model_path):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -73,13 +79,28 @@ class SvcDDSP:
             if self.spk_info is not None:
                 # update speaker embeds
                 self.spk_embeds = {
-                    i: torch.from_numpy(self.spk_info[i].item()['spk_embed']).float().to(self.device).unsqueeze(0)
+                    i: {
+                        'spk_embed': torch.from_numpy(self.spk_info[i].item()['spk_embed']).float().to(self.device).unsqueeze(0),
+                        'spk_name': self.spk_info[i].item()['name'],
+                    }
                     for i in self.spk_info.files
                 }
             else:
                 self.spk_embeds = None
                 
         return self.device
+    
+    
+    def update_pitch_extractor(self, pitch_extractor_type, sample_rate):
+        hop_size = self.args.data.block_size * sample_rate / self.args.data.sampling_rate
+        self.pitch_extractor = F0Extractor(
+            pitch_extractor_type,
+            sample_rate,
+            hop_size,
+            self.args.data.f0_min,
+            self.args.data.f0_max)
+        self.select_pitch_extractor = pitch_extractor_type
+        self.pitch_extractor_sample_rate = sample_rate
                 
 
     def infer(self,
@@ -97,7 +118,7 @@ class SvcDDSP:
               intonation_base=220.0,
               safe_prefix_pad_length=0,
               ):
-        print("Infering...")
+        # print("Infering...")
         # load input
         # audio, sample_rate = librosa.load(input_wav, sr=None, mono=True)
         hop_size = self.args.data.block_size * sample_rate / self.args.data.sampling_rate
@@ -108,13 +129,13 @@ class SvcDDSP:
             silence_front = 0
 
         # extract f0
-        pitch_extractor = F0Extractor(
-            pitch_extractor_type,
-            sample_rate,
-            hop_size,
-            float(f0_min),
-            float(f0_max))
-        f0 = pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        # pitch_extractor = F0Extractor(
+        #     pitch_extractor_type,
+        #     sample_rate,
+        #     hop_size,
+        #     self.args.data.f0_min,
+        #     self.args.data.f0_max)
+        f0 = self.pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0_uv = f0 == 0
         f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(self.args.data.sampling_rate/self.args.data.block_size) + float(self.args.data.sampling_rate/self.args.data.block_size)
@@ -148,13 +169,13 @@ class SvcDDSP:
                 spk_mix = torch.tensor([[[1.]]]).to(self.device)
         else:
             if use_spk_mix:
-                spk_id = torch.stack([self.spk_embeds[str(k)] for k in spk_mix_dict.keys()]).to(self.device)
+                spk_id = torch.stack([self.spk_embeds[str(k)]['spk_embed'] for k in spk_mix_dict.keys()]).to(self.device)
                 spk_mix = torch.tensor([[[float(v) for v in spk_mix_dict.values()]]]).transpose(-1, 0).to(self.device)
             else:
                 spk_id = self.spk_embeds.get(str(spk_id))
                 if spk_id is None:
                     spk_id = list(self.spk_embeds.values())[0]
-                spk_id = spk_id.unsqueeze(0)
+                spk_id = spk_id['spk_embed'].unsqueeze(0)
                 spk_mix = torch.tensor([[[1.]]]).to(self.device)
 
         # forward and return the output
@@ -181,7 +202,7 @@ class Config:
         self.checkpoint_path = ''
         self.threhold = -45
         self.crossfade_time = 0.04
-        self.extra_time = 2.0
+        self.extra_time = 1.5
         self.select_pitch_extractor = 'harvest'  # F0预测器["parselmouth", "dio", "harvest", "crepe", "rmvpe", "fcpe"]
         self.use_spk_mix = False
         self.sounddevices = ['', '']
@@ -255,7 +276,7 @@ class GUI:
             ], title=i18n('音频设备'))
             ],
             [sg.Frame(layout=[
-                [sg.Text(i18n("说话人id")), sg.Input(key='spk_id', default_text='1')],
+                [sg.Text(i18n("说话人id")), sg.Input(key='spk_id', default_text='1'), sg.Text("", key='spk_name')],
                 [sg.Text(i18n("响应阈值")),
                  sg.Slider(range=(-60, 0), orientation='h', key='threhold', resolution=1, default_value=-45,
                            enable_events=True)],
@@ -320,7 +341,7 @@ class GUI:
                 print('using_cuda:' + str(torch.cuda.is_available()))
                 self.start_vc()
             elif event == 'spk_id':
-                self.config.spk_id = int(values['spk_id'])
+                self.update_spk(values['spk_id'])
             elif event == 'threhold':
                 self.config.threhold = values['threhold']
             elif event == 'pitch':
@@ -337,6 +358,7 @@ class GUI:
                     self.config.spk_mix_dict = eval("{" + spk_mix.replace('，', ',').replace('：', ':') + "}")
             elif event == 'f0_mode':
                 self.config.select_pitch_extractor = values['f0_mode']
+                self.svc_model.update_pitch_extractor(values['f0_mode'], self.config.samplerate)
             elif event == 'use_phase_vocoder':
                 self.config.use_phase_vocoder = values['use_phase_vocoder']
             elif event == 'load_config' and not flag_vc:
@@ -389,11 +411,22 @@ class GUI:
         self.window['crossfade'].update(self.config.crossfade_time)
         self.window['extra'].update(self.config.extra_time)
         self.window['f0_mode'].update(self.config.select_pitch_extractor)
+        
+    def update_spk(self, spk_id):
+        self.config.spk_id = int(spk_id)
+        if self.svc_model.spk_embeds is not None:
+            if spk_id not in self.svc_model.spk_embeds:
+                self.config.spk_id = int(list(self.svc_model.spk_embeds.keys())[0])
+            self.window['spk_name'].update(self.svc_model.spk_embeds[str(self.config.spk_id)]['spk_name'])
+        else:
+            self.window['spk_name'].update(str(self.config.spk_id))
 
     def start_vc(self):
         '''开始音频转换'''
         torch.cuda.empty_cache()
         self.device = self.svc_model.update_model(self.config.checkpoint_path)
+        self.update_spk(self.config.spk_id)
+        self.svc_model.update_pitch_extractor(self.config.select_pitch_extractor, self.config.samplerate)
         self.input_wav = np.zeros(self.input_frame, dtype='float32')
         self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
         self.fade_in_window = torch.sin(
@@ -427,7 +460,7 @@ class GUI:
         音频处理
         '''
         start_time = time.perf_counter()
-        print("\nStarting callback")
+        # print("\nStarting callback")
         self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
         self.input_wav[-self.block_frame:] = librosa.to_mono(indata.T)
 
@@ -471,7 +504,7 @@ class GUI:
             F.conv1d(conv_input ** 2, torch.ones(1, 1, self.crossfade_frame, device=self.device)) + 1e-8)
         sola_shift = torch.argmax(cor_nom[0, 0] / cor_den[0, 0])
         temp_wav = temp_wav[sola_shift: sola_shift + self.block_frame + self.crossfade_frame]
-        print('sola_shift: ' + str(int(sola_shift)))
+        print(f'\rsola_shift: {int(sola_shift):4}', end="")
 
         # phase vocoder
         if self.config.use_phase_vocoder:
@@ -488,7 +521,7 @@ class GUI:
 
         outdata[:] = temp_wav[: - self.crossfade_frame, None].repeat(1, 2).cpu().numpy()
         end_time = time.perf_counter()
-        print('infer_time: ' + str(end_time - start_time))
+        print(f' infer_time: {end_time - start_time:.5f}', end="")
         if flag_vc:
             self.window['infer_time'].update(int((end_time - start_time) * 1000))
 
@@ -524,6 +557,219 @@ class GUI:
         print("output device:" + str(sd.default.device[1]) + ":" + str(output_device))
 
 
+def parse_args(args=None, namespace=None):
+    """Parse command-line arguments."""
+    parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "-m",
+        "--model_path",
+        type=str,
+        required=True,
+        help="path to the model file",
+    )
+    parser.add_argument(
+        "-d",
+        "--device",
+        type=str,
+        default=None,
+        required=False,
+        help="cpu or cuda, auto if not set")
+    parser.add_argument(
+        "-i",
+        "--input",
+        type=str,
+        required=True,
+        help="path to the input audio file",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=str,
+        required=True,
+        help="path to the output audio file",
+    )
+    parser.add_argument(
+        "-id",
+        "--spk_id",
+        type=int,
+        required=False,
+        default=1,
+        help="speaker id (for multi-speaker model) | default: 1",
+    )
+    parser.add_argument(
+        "-semb",
+        "--spk_embed",
+        type=str,
+        required=False,
+        default="None",
+        help="speaker embed .npz file (for multi-speaker with spk_embed_encoder model) | default: None",
+    )
+    parser.add_argument(
+        "-mix",
+        "--spk_mix_dict",
+        type=str,
+        required=False,
+        default="None",
+        help="mix-speaker dictionary (for multi-speaker model) | default: None",
+    )
+    parser.add_argument(
+        "-intb",
+        "--intonation_base",
+        type=float,
+        required=False,
+        default=220.0,
+        help="base freq of intonation changed | default: 220.0",
+    )
+    parser.add_argument(
+        "-into",
+        "--intonation",
+        type=float,
+        required=False,
+        default=1.0,
+        help="intonation changed (above 1.0 for exciter, below for calmer) | default: 1.0",
+    )
+    parser.add_argument(
+        "-k",
+        "--key",
+        type=int,
+        required=False,
+        default=0,
+        help="key changed (number of semitones) | default: 0",
+    )
+    parser.add_argument(
+        "-pe",
+        "--pitch_extractor",
+        type=str,
+        required=False,
+        default='rmvpe',
+        help="pitch extrator type: dio, harvest, crepe, fcpe, rmvpe (default)",
+    )
+    parser.add_argument(
+        "-fmin",
+        "--f0_min",
+        type=float,
+        required=False,
+        default=50,
+        help="min f0 (Hz) | default: 50",
+    )
+    parser.add_argument(
+        "-fmax",
+        "--f0_max",
+        type=float,
+        required=False,
+        default=1200,
+        help="max f0 (Hz) | default: 1200",
+    )
+    parser.add_argument(
+        "-th",
+        "--threhold",
+        type=float,
+        required=False,
+        default=-45,
+        help="response threhold (dB) | default: -45",
+    )
+    parser.add_argument(
+        "-bt",
+        "--block_time",
+        type=float,
+        default=0.3,
+    )
+    parser.add_argument(
+        "-ct",
+        "--crossfade_time",
+        type=float,
+        default=0.04,
+    )
+    parser.add_argument(
+        "-et",
+        "--extra_time",
+        type=float,
+        default=1.5,
+    )
+    parser.add_argument(
+       "-pb" ,
+       "--phase_vocoder",
+       action="store_true",
+    )
+    return parser.parse_args(args=args, namespace=namespace)
+
+
+class OfflineRenderer(GUI):
+    def __init__(self, cmd, sr=44100) -> None:
+        self.cmd = cmd
+        self.config = Config()
+        self.block_frame = 0
+        self.crossfade_frame = 0
+        self.sola_search_frame = 0
+        if cmd.device is None:
+            self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
+        else:
+            self.device = cmd.device
+        self.svc_model: SvcDDSP = SvcDDSP()
+        self.fade_in_window: np.ndarray = None  # crossfade计算用numpy数组
+        self.fade_out_window: np.ndarray = None  # crossfade计算用numpy数组
+        self.input_wav: np.ndarray = None  # 输入音频规范化后的保存地址
+        self.output_wav: np.ndarray = None  # 输出音频规范化后的保存地址
+        self.sola_buffer: torch.Tensor = None  # 保存上一个output的crossfade
+        self.f0_mode_list = ["dio", "harvest", "crepe", "rmvpe", "fcpe"]  # F0预测器
+        self.f_safe_prefix_pad_length: float = 0.0
+        self.resample_kernel = {}
+        self.stream = None
+        
+        self.config.checkpoint_path = cmd.model_path
+        self.config.spk_id = cmd.spk_id
+        self.config.threhold = cmd.threhold
+        self.config.f_pitch_change = cmd.key
+        self.config.f_intonation = cmd.intonation
+        self.config.f_intonation_base = cmd.intonation_base
+        self.config.samplerate = sr
+        self.config.block_time = cmd.block_time
+        self.config.crossfade_time = cmd.crossfade_time
+        self.config.extra_time = cmd.extra_time
+        self.config.select_pitch_extractor = cmd.pitch_extractor
+        self.config.use_phase_vocoder = cmd.phase_vocoder
+        self.config.use_spk_mix = cmd.spk_mix_dict != "None"
+        self.config.spk_mix_dict = eval("{" + cmd.spk_mix_dict.replace('，', ',').replace('：', ':') + "}")
+        self.block_frame = int(self.config.block_time * self.config.samplerate)
+        self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate)
+        self.sola_search_frame = int(0.01 * self.config.samplerate)
+        self.last_delay_frame = int(0.02 * self.config.samplerate)
+        self.extra_frame = int(self.config.extra_time * self.config.samplerate)
+        self.input_frame = max(
+            self.block_frame + self.crossfade_frame + self.sola_search_frame + 2 * self.last_delay_frame,
+            self.block_frame + self.extra_frame)
+        self.f_safe_prefix_pad_length = self.config.extra_time - self.config.crossfade_time - 0.01 - 0.02
+        
+        self.device = self.svc_model.update_model(self.config.checkpoint_path)
+        self.svc_model.update_pitch_extractor(self.config.select_pitch_extractor, self.config.samplerate)
+        self.input_wav = np.zeros(self.input_frame, dtype='float32')
+        self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
+        self.fade_in_window = torch.sin(
+            np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
+        self.fade_out_window = 1 - self.fade_in_window
+        
+    def render(self, indata: np.ndarray, outdata: np.ndarray):
+        super().audio_callback(indata, outdata, 0, 0, None)
+
+
 if __name__ == "__main__":
-    i18n = gui_locale.I18nAuto()
-    gui = GUI()
+    if len(sys.argv) <= 1:
+        # launch GUI
+        i18n = gui_locale.I18nAuto()
+        gui = GUI()
+    else:
+        # offline rendering
+        import soundfile as sf
+        cmd = parse_args()
+        info = sf.info(cmd.input)
+        renderer = OfflineRenderer(cmd, info.samplerate)
+        
+        blocksize = int(cmd.block_time * info.samplerate)
+        buffer_frames = int(info.frames//blocksize + 1) * blocksize
+        result = np.zeros((1, buffer_frames, 2), dtype=np.float64)
+        for idx, block in enumerate(sf.blocks(cmd.input, blocksize=blocksize, fill_value=0.0)):
+            renderer.render(block, result[:, idx*blocksize:(idx+1)*blocksize])
+            
+        delayed_frames = renderer.sola_search_frame + renderer.crossfade_frame + renderer.last_delay_frame
+        sf.write(cmd.output, result[:, delayed_frames:info.frames+delayed_frames, 0].squeeze(0), info.samplerate)
+    
