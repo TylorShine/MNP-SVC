@@ -8,6 +8,7 @@ from modules.common import load_config, load_model
 from modules.dataset.loader import get_data_loaders
 from modules.solver import train
 from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly
+from modules.discriminator import MultiSpecDiscriminator
 from modules.loss import RSSLoss, DSSLoss, DLFSSLoss
 
 
@@ -62,12 +63,14 @@ if __name__ == '__main__':
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
+            if args.model.use_discriminator:
+                model_d = MultiSpecDiscriminator()
             
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
     
     
-    # load parameters
+    # load model parameters
     optimizer = torch.optim.AdamW(model.parameters())
     initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
     
@@ -102,6 +105,36 @@ if __name__ == '__main__':
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
     else:
         loss_func = RSSLoss(args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, device=args.device)
+        
+        
+    if args.model.use_discriminator:
+        # load discriminator model parameters
+        optimizer_d = torch.optim.AdamW(model_d.parameters())
+        _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, postfix="D_", device=args.device)
+        lr = args.train.lr if states is None else states['last_lr'][0]
+        
+        for param_group in optimizer_d.param_groups:
+            param_group['initial_lr'] = args.train.lr
+            param_group['lr'] = lr
+            param_group['weight_decay'] = args.train.weight_decay
+            
+        scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+                                                                 threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+                                                                 cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+    
+        if states is not None:
+            sched_states = states.get('scheduler')
+            if sched_states is not None:
+                scheduler_d.best = sched_states['best']
+                scheduler_d.cooldown_counter = sched_states['cooldown_counter']
+                scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
+                scheduler_d._last_lr = sched_states['_last_lr']
+        else:
+            scheduler_d._last_lr = (lr,)
+    else:
+        model_d, optimizer_d, scheduler_d = None
+        
+    
 
 
     # device
@@ -127,5 +160,5 @@ if __name__ == '__main__':
     
     
     # run
-    train(args, initial_global_step, model, optimizer, scheduler, loss_func, loaders['train'], loaders['test'])
+    train(args, initial_global_step, (model, optimizer, scheduler, loss_func), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
     

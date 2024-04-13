@@ -7,6 +7,8 @@ from torch import autocast
 from torch.cuda.amp import GradScaler
 from tqdm import tqdm
 
+from modules.loss import discriminator_loss, feature_loss, generator_loss
+
 from modules.logger.saver import Saver
 from modules.logger import utils
 
@@ -70,13 +72,17 @@ def test(args, model, loss_func, loader_test, saver):
     return test_loss
 
 
-def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loader_train, loader_test):
+def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
+    model, optimizer, scheduler, loss_func = nets_g
+    model_d, optimizer_d, scheduler_d = nets_d
     # saver
     saver = Saver(args, initial_global_step=initial_global_step)
     
     # run
     num_batches = len(loader_train)
     model.train()
+    if model_d is not None:
+        model_d.train()
     scaler = GradScaler()
     if args.train.amp_dtype == 'fp32':
         dtype = torch.float32
@@ -289,7 +295,10 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
     
     
     # model size
-    params_count = utils.get_network_params_amount({'model': model})
+    model_dict = {'model': model}
+    if model_d is not None:
+        model_dict['discriminator': model_d]
+    params_count = utils.get_network_params_amount(model_dict)
     saver.log_info('--- model size ---')
     saver.log_info(params_count)
     saver.log_info('======= start training =======')
@@ -297,6 +306,8 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
         for batch_idx, data in enumerate(loader_train):
             saver.global_step_increment()
             optimizer.zero_grad()
+            if optimizer_d is not None:
+                optimizer_d.zero_grad()
 
             # unpack data
             for k in data.keys():
@@ -321,8 +332,37 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
                                             # aug_shift=data['aug_shift'], infer=False)
 
             # loss
-            loss = loss_func(signal, audio)
-            
+            losses = [loss_func(signal, audio)]
+               
+            if model_d is not None:
+                with autocast(device_type=args.device, dtype=dtype):
+                    d_signal_real, d_signal_gen, _, _ = model_d(audio, signal.detach())
+                    
+                # discriminator loss
+                loss_d, losses_d_real, losses_d_gen = discriminator_loss(d_signal_real, d_signal_gen)
+                
+                # handle nan loss
+                if torch.isnan(loss_d):
+                    raise ValueError(' [x] discriminator: nan loss ')
+                else:
+                    # backpropagate
+                    if dtype == torch.float32:
+                        loss_d.backward()
+                        optimizer_d.step()
+                    else:
+                        scaler.scale(loss_d).backward()
+                        scaler.step(optimizer_d)
+                
+                # generator loss
+                with autocast(device_type=args.device, dtype=dtype):
+                    d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio, signal)
+                    
+                loss_gen, losses_gen = generator_loss(d_signal_gen)
+                
+                losses.append(loss_gen)
+                
+            loss = torch.sum(losses)
+                
             # handle nan loss
             if torch.isnan(loss):
                 raise ValueError(' [x] nan loss ')
@@ -335,6 +375,7 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
                     scaler.scale(loss).backward()
                     scaler.step(optimizer)
                     scaler.update()
+
 
             # log loss
             if saver.global_step % args.train.interval_log == 0:
@@ -353,10 +394,27 @@ def train(args, initial_global_step, model, optimizer, scheduler, loss_func, loa
                     end="",
                 )
                 
-                saver.log_value({
-                    'train/loss': loss.item(),
-                    'train/lr': scheduler.get_last_lr()[0],
-                })
+                log_dict = {
+                    'train/g/loss': loss.item(),
+                    'train/g/lr': scheduler.get_last_lr()[0],
+                }
+                
+                if model_d is not None:
+                    log_dict.update({
+                        'train/d/loss': loss_d.item(),
+                        'train/d/lr': scheduler_d.get_last_lr()[0],
+                    })
+                    log_dict.update({
+                        f'train/g/{i}': v for i, v in enumerate(losses_gen)
+                    })
+                    log_dict.update({
+                        f'train/d_r/{i}': v for i, v in enumerate(losses_d_real)
+                    })
+                    log_dict.update({
+                        f'train/d_g/{i}': v for i, v in enumerate(losses_d_gen)
+                    })
+                
+                saver.log_value(log_dict)
             
             # validation
             if saver.global_step % args.train.interval_val == 0:
