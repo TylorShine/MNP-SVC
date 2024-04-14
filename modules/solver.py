@@ -470,9 +470,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 
                 model.train()
                 
-        # NOTE: The scheduler associating the train loss instead of validation loss.
-        #       This is not ideal. but we use long validation span which cause the lr
-        #       doesn't get updated very often if use the validation one.
-        scheduler.step(loss)
+        if not args.model.use_discriminator:
+            # NOTE: The scheduler associating the train loss instead of validation loss.
+            #       This is not ideal. but we use long validation span which cause the lr
+            #       doesn't get updated very often if use the validation one.
+            scheduler.step(loss)
+        else:
+            scheduler.step()
 
                           
