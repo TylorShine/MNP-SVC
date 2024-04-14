@@ -78,6 +78,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     # saver
     saver = Saver(args, initial_global_step=initial_global_step)
     
+    last_model_save_step = saver.global_step
+    
     # run
     num_batches = len(loader_train)
     model.train()
@@ -297,7 +299,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     # model size
     model_dict = {'model': model}
     if model_d is not None:
-        model_dict['discriminator': model_d]
+        model_dict['discriminator'] = model_d
     params_count = utils.get_network_params_amount(model_dict)
     saver.log_info('--- model size ---')
     saver.log_info(params_count)
@@ -336,7 +338,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                
             if model_d is not None:
                 with autocast(device_type=args.device, dtype=dtype):
-                    d_signal_real, d_signal_gen, _, _ = model_d(audio, signal.detach())
+                    d_signal_real, d_signal_gen, _, _ = model_d(audio.unsqueeze(1), signal.detach().unsqueeze(1))
                     
                 # discriminator loss
                 loss_d, losses_d_real, losses_d_gen = discriminator_loss(d_signal_real, d_signal_gen)
@@ -348,20 +350,24 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     # backpropagate
                     if dtype == torch.float32:
                         loss_d.backward()
+                        torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
                         optimizer_d.step()
                     else:
                         scaler.scale(loss_d).backward()
+                        scaler.unscale_(optimizer_d)
+                        torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
                         scaler.step(optimizer_d)
                 
                 # generator loss
                 with autocast(device_type=args.device, dtype=dtype):
-                    d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio, signal)
+                    d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio.unsqueeze(1), signal.unsqueeze(1))
                     
+                loss_fm = feature_loss(fmap_real, fmap_gen)
                 loss_gen, losses_gen = generator_loss(d_signal_gen)
                 
-                losses.append(loss_gen)
+                losses.extend((loss_gen*0.5, loss_fm*0.05))    # TODO: parametrize
                 
-            loss = torch.sum(losses)
+            loss = torch.stack(losses).sum()
                 
             # handle nan loss
             if torch.isnan(loss):
@@ -370,9 +376,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # backpropagate
                 if dtype == torch.float32:
                     loss.backward()
+                    torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
                     optimizer.step()
                 else:
                     scaler.scale(loss).backward()
+                    scaler.unscale_(optimizer)
+                    torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
                     scaler.step(optimizer)
                     scaler.update()
 
@@ -405,13 +414,16 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                         'train/d/lr': scheduler_d.get_last_lr()[0],
                     })
                     log_dict.update({
-                        f'train/g/{i}': v for i, v in enumerate(losses_gen)
-                    })
-                    log_dict.update({
                         f'train/d_r/{i}': v for i, v in enumerate(losses_d_real)
                     })
                     log_dict.update({
                         f'train/d_g/{i}': v for i, v in enumerate(losses_d_gen)
+                    })
+                    log_dict.update({
+                        f'train/g/{i}': v for i, v in enumerate(losses_gen)
+                    })
+                    log_dict.update({
+                        f'train/g/fm': loss_fm.item()
                     })
                 
                 saver.log_value(log_dict)
@@ -426,7 +438,20 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 }
                     
                 # save latest
-                saver.save_model(model, optimizer_save, postfix=f'{saver.global_step}', states=states)
+                saver.save_model(model, optimizer_save, postfix=f'_{saver.global_step}', states=states)
+                
+                if model_d is not None:
+                    optimizer_d_save = optimizer_d if args.train.save_opt else None
+                    states_d = {
+                        'scheduler': scheduler_d.state_dict(),
+                        'last_lr': scheduler_d.get_last_lr(),
+                    }
+                    saver.save_model(model_d, optimizer_d_save, postfix=f'D_{saver.global_step}', states=states_d)
+                    
+                    if last_model_save_step > 0:
+                        saver.delete_model(postfix=f'D_{last_model_save_step}')
+                        
+                last_model_save_step = saver.global_step
 
                 # run testing set
                 if loader_test is not None:

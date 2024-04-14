@@ -59,6 +59,7 @@ if __name__ == '__main__':
                 use_harmonic_env=args.model.use_harmonic_env,
                 use_noise_env=args.model.use_noise_env,
                 noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+                add_noise=args.model.add_noise,
                 use_f0_offset=args.model.use_f0_offset,
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
@@ -110,7 +111,7 @@ if __name__ == '__main__':
     if args.model.use_discriminator:
         # load discriminator model parameters
         optimizer_d = torch.optim.AdamW(model_d.parameters())
-        _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, postfix="D_", device=args.device)
+        _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
         lr = args.train.lr if states is None else states['last_lr'][0]
         
         for param_group in optimizer_d.param_groups:
@@ -132,7 +133,7 @@ if __name__ == '__main__':
         else:
             scheduler_d._last_lr = (lr,)
     else:
-        model_d, optimizer_d, scheduler_d = None
+        model_d, optimizer_d, scheduler_d = None, None, None
         
     
 
@@ -141,6 +142,8 @@ if __name__ == '__main__':
     if args.device == 'cuda':
         torch.cuda.set_device(args.env.gpu_id)
     model.to(args.device)
+    if model_d is not None:
+        model_d.to(args.device)
     
     for state in optimizer.state.values():
         for k, v in state.items():

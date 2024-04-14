@@ -5,7 +5,6 @@ from torch.nn import Conv1d, Conv2d
 from torch.nn import functional as F
 from torch.nn.utils import spectral_norm, weight_norm
 
-
 import torchaudio
 
 
@@ -31,51 +30,51 @@ class DiscriminatorSpec(torch.nn.Module):
                 norm_f(
                     Conv2d(
                         1,
+                        16,
+                        (kernel_size, 7),
+                        (stride, 2),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
+                    )
+                ),
+                norm_f(
+                    Conv2d(
+                        16,
                         32,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_keep_size_padding(kernel_size, 1), 0),
+                        (kernel_size, 7),
+                        (stride, 2),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
                     )
                 ),
+                # norm_f(
+                #     Conv2d(
+                #         32,
+                #         32,
+                #         (kernel_size, 7),
+                #         (stride, 2),
+                #         padding=(get_keep_size_padding(kernel_size, 1), 2),
+                #     )
+                # ),
+                # norm_f(
+                #     Conv2d(
+                #         32,
+                #         32,
+                #         (kernel_size, 7),
+                #         (stride, 2),
+                #         padding=(get_keep_size_padding(kernel_size, 1), 2),
+                #     )
+                # ),
                 norm_f(
                     Conv2d(
                         32,
-                        64,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_keep_size_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        64,
-                        128,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_keep_size_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        128,
-                        256,
-                        (kernel_size, 1),
-                        (stride, 1),
-                        padding=(get_keep_size_padding(kernel_size, 1), 0),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        256,
-                        256,
-                        (kernel_size, 1),
-                        1,
-                        padding=(get_keep_size_padding(kernel_size, 1), 0),
+                        32,
+                        (kernel_size, 3),
+                        (1, 1),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
                     )
                 ),
             ]
         )
-        self.conv_post = norm_f(Conv2d(256, 1, (3, 1), 1, padding=(1, 0)))
+        self.conv_post = norm_f(Conv2d(32, 1, (3, 1), 1, padding=(1, 0)))
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
@@ -103,12 +102,13 @@ class DiscriminatorS(torch.nn.Module):
                 norm_f(Conv1d(1, 16, 15, 1, padding=7)),
                 norm_f(Conv1d(16, 64, 41, 4, groups=4, padding=20)),
                 norm_f(Conv1d(64, 256, 41, 4, groups=16, padding=20)),
-                norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
-                norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
-                norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
+                # norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
+                # norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
+                # norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
             ]
         )
-        self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
+        self.conv_post = norm_f(Conv1d(256, 1, 3, 1, padding=1))
+        
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
@@ -127,7 +127,8 @@ class DiscriminatorS(torch.nn.Module):
 class MultiSpecDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm: bool = False) -> None:
         super(MultiSpecDiscriminator, self).__init__()
-        periods = [61, 89, 131, 193, 283]
+        # periods = [61, 89, 131, 193, 283]
+        periods = [31, 89, 467]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [

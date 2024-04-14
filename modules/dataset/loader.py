@@ -270,6 +270,7 @@ def get_data_loaders(args):
             units_only=args.train.only_u2c_stack),
         batch_size=args.train.batch_size,
         shuffle=True,
+        drop_last=True,
         num_workers=args.train.num_workers if args.train.cache_device=='cpu' else 0,
         persistent_workers=(args.train.num_workers > 0) if args.train.cache_device=='cpu' else False,
         pin_memory=True if args.train.cache_device=='cpu' else False

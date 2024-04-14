@@ -40,9 +40,9 @@ def load_model(
         postfix='_',
         device='cpu'):
     if postfix != '_':
-        postfix = '_' + postfix
+        postfix = postfix
     path = os.path.join(expdir, name+postfix)
-    path_pt = glob.glob(f'{expdir}/*.pt')
+    path_pt = glob.glob(f'{expdir}/{name}{postfix}*.pt')
     global_step = 0
     states = None
     if len(path_pt) > 0:
@@ -52,11 +52,12 @@ def load_model(
             path_pt = path+str(maxstep)+'.pt'
         else:
             path_pt = path+'best.pt'
-        print(' [*] restoring model from', path_pt)
-        ckpt = torch.load(path_pt, map_location=torch.device(device))
-        global_step = ckpt['global_step']
-        states = ckpt.get('states')
-        model.load_state_dict(ckpt['model'], strict=False)
-        if ckpt.get('optimizer') != None:
-            optimizer.load_state_dict(ckpt['optimizer'])
+        if os.path.isfile(path_pt):
+            print(' [*] restoring model from', path_pt)
+            ckpt = torch.load(path_pt, map_location=torch.device(device))
+            global_step = ckpt['global_step']
+            states = ckpt.get('states')
+            model.load_state_dict(ckpt['model'], strict=False)
+            if ckpt.get('optimizer') != None:
+                optimizer.load_state_dict(ckpt['optimizer'])
     return global_step, model, optimizer, states

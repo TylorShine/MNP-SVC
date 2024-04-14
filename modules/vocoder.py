@@ -37,6 +37,7 @@ def load_model(
             use_harmonic_env=args.model.use_harmonic_env,
             use_noise_env=args.model.use_noise_env,
             noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
             use_f0_offset=args.model.use_f0_offset,
             use_pitch_aug=args.model.use_pitch_aug,
             noise_seed=args.model.noise_seed,
@@ -161,6 +162,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             use_harmonic_env=False,
             use_noise_env=True,
             noise_to_harmonic_phase=False,
+            add_noise=False,
             use_f0_offset=False,
             use_pitch_aug=False,
             noise_seed=289,
@@ -185,6 +187,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         self.register_buffer("use_harmonic_env", torch.tensor(use_harmonic_env))
         self.register_buffer("use_noise_env", torch.tensor(use_noise_env))
         self.register_buffer("noise_to_harmonic_phase", torch.tensor(noise_to_harmonic_phase))
+        self.register_buffer("add_noise", torch.tensor(add_noise))
         self.register_buffer("use_f0_offset", torch.tensor(use_f0_offset))
         self.register_buffer("use_speaker_embed", torch.tensor(use_speaker_embed))
         self.register_buffer("use_embed_conv", torch.tensor(use_embed_conv))
@@ -425,6 +428,8 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             # it expected that learning to amount of per-frequency phase modulation by noise
             # TODO: could be simplify more?
             signal_stft.imag += noise_stft.real
+            if self.add_noise:
+                signal_stft += noise_stft
         else:
             signal_stft = combtooth_stft + noise_stft
         

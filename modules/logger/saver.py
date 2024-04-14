@@ -55,9 +55,9 @@ class Saver(object):
                     msg_list.append(f'{k}:')
                     for kk, vv in v.items():
                         if isinstance(v, int):
-                            msg_list.append(f'{kk}: {vv:,}')
+                            msg_list.append(f' {kk}: {vv:,}')
                         else:
-                            msg_list.append(f'{kk}: {vv}')
+                            msg_list.append(f' {kk}: {vv}')
                 else:
                     if isinstance(v, int):
                         msg_list.append(f'{k}: {v:,}')
@@ -113,12 +113,12 @@ class Saver(object):
             model, 
             optimizer,
             name='model',
-            postfix='',
+            postfix='_',
             as_json=False,
             states=None):
         # path
-        if postfix:
-            postfix = '_' + postfix
+        if postfix != '_':
+            postfix = postfix
         path_pt = os.path.join(
             self.expdir , name+postfix+'.pt')
        
@@ -143,10 +143,10 @@ class Saver(object):
                 self.expdir , name+'.json')
             to_json(path_pt, path_json)
     
-    def delete_model(self, name='model', postfix=''):
+    def delete_model(self, name='model', postfix='_'):
         # path
-        if postfix:
-            postfix = '_' + postfix
+        if postfix != '_':
+            postfix = postfix
         path_pt = os.path.join(
             self.expdir , name+postfix+'.pt')
        
