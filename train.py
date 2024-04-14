@@ -82,19 +82,22 @@ if __name__ == '__main__':
         param_group['lr'] = lr
         param_group['weight_decay'] = args.train.weight_decay
         
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
-                                                           threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
-                                                           cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-    
-    if states is not None:
-        sched_states = states.get('scheduler')
-        if sched_states is not None:
-            scheduler.best = sched_states['best']
-            scheduler.cooldown_counter = sched_states['cooldown_counter']
-            scheduler.num_bad_epochs = sched_states['num_bad_epochs']
-            scheduler._last_lr = sched_states['_last_lr']
+    if not args.model.use_discriminator:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+                                                            threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+                                                            cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+        if states is not None:
+            sched_states = states.get('scheduler')
+            if sched_states is not None:
+                scheduler.best = sched_states['best']
+                scheduler.cooldown_counter = sched_states['cooldown_counter']
+                scheduler.num_bad_epochs = sched_states['num_bad_epochs']
+                scheduler._last_lr = sched_states['_last_lr']
+        else:
+            scheduler._last_lr = (lr,)
     else:
-        scheduler._last_lr = (lr,)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+    
         
         
     # loss
