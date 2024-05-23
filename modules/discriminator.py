@@ -84,8 +84,9 @@ class DiscriminatorSpec(torch.nn.Module):
 
         for layer in self.convs:
             x = layer(x)
-            x = F.leaky_relu(x, 0.1)
             fmap.append(x)
+            x = F.leaky_relu(x, 0.1)
+            # fmap.append(x)
         x = self.conv_post(x)
         fmap.append(x)
         x = torch.flatten(x, 1, -1)
@@ -102,12 +103,13 @@ class DiscriminatorS(torch.nn.Module):
                 norm_f(Conv1d(1, 16, 15, 1, padding=7)),
                 norm_f(Conv1d(16, 64, 41, 4, groups=4, padding=20)),
                 norm_f(Conv1d(64, 256, 41, 4, groups=16, padding=20)),
-                # norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
-                # norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
-                # norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
+                norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
+                norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
+                norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
             ]
         )
-        self.conv_post = norm_f(Conv1d(256, 1, 3, 1, padding=1))
+        # self.conv_post = norm_f(Conv1d(256, 1, 3, 1, padding=1))
+        self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
         
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
@@ -115,8 +117,9 @@ class DiscriminatorS(torch.nn.Module):
 
         for layer in self.convs:
             x = layer(x)
-            x = F.leaky_relu(x, 0.1)
             fmap.append(x)
+            x = F.leaky_relu(x, 0.1)
+            # fmap.append(x)
         x = self.conv_post(x)
         fmap.append(x)
         x = torch.flatten(x, 1, -1)
@@ -128,7 +131,9 @@ class MultiSpecDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm: bool = False) -> None:
         super(MultiSpecDiscriminator, self).__init__()
         # periods = [61, 89, 131, 193, 283]
-        periods = [31, 89, 467]
+        # periods = [31, 89, 467]
+        # periods = [173, 337, 673]
+        periods = [62, 178, 346]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [
@@ -150,9 +155,9 @@ class MultiSpecDiscriminator(torch.nn.Module):
         for i, d in enumerate(self.discriminators):
             y_d_r, fmap_r = d(y)
             y_d_g, fmap_g = d(y_hat)
-            y_d_rs.append(y_d_r)
-            y_d_gs.append(y_d_g)
-            fmap_rs.append(fmap_r)
-            fmap_gs.append(fmap_g)
+            y_d_rs.append(y_d_r - y_d_g)
+            y_d_gs.append(y_d_g - y_d_r)
+            fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
+            fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs

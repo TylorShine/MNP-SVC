@@ -82,7 +82,9 @@ if __name__ == '__main__':
         param_group['lr'] = lr
         param_group['weight_decay'] = args.train.weight_decay
         
-    if not args.model.use_discriminator:
+    if args.train.only_u2c_stack:
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+    elif not args.model.use_discriminator:
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
                                                             threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
                                                             cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
@@ -96,7 +98,8 @@ if __name__ == '__main__':
         else:
             scheduler._last_lr = (lr,)
     else:
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
     
         
         
@@ -122,16 +125,17 @@ if __name__ == '__main__':
             param_group['lr'] = lr
             param_group['weight_decay'] = args.train.weight_decay
             
-        scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
-                                                                 threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
-                                                                 cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+        # scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+        #                                                          threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+        #                                                          cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
     
         if states is not None:
             sched_states = states.get('scheduler')
             if sched_states is not None:
-                scheduler_d.best = sched_states['best']
-                scheduler_d.cooldown_counter = sched_states['cooldown_counter']
-                scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
+                # scheduler_d.best = sched_states['best']
+                # scheduler_d.cooldown_counter = sched_states['cooldown_counter']
+                # scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
                 scheduler_d._last_lr = sched_states['_last_lr']
         else:
             scheduler_d._last_lr = (lr,)

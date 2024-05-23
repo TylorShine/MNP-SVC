@@ -206,31 +206,32 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                         
                         if dtype == torch.float32:
                             losses.append(
-                                F.mse_loss(
+                                F.l1_loss(
                                     1. - (F.cosine_similarity(signal[b, f], signal[opps[sim_maxi_opp], sim_maxi_opp_frame], dim=0)*0.5 + 0.5),
                                     (1. - (F.cosine_similarity(units.float()[b, f], sim_maxi_opps_centroid, dim=0)*0.5 + 0.5))*args.train.loss_variation)
                             )
                             
                             losses.append(
-                                F.mse_loss(
+                                F.l1_loss(
                                     F.cosine_similarity(signal[b, f], signal[opps[sim_mini_opp], sim_mini_opp_frame], dim=0)*0.5 + 0.5,
                                     (F.cosine_similarity(units.float()[b, f], sim_mini_opps_centroid, dim=0)*0.5 + 0.5)*args.train.low_similar_loss_variation)
                             )
                         else:
                             with autocast(device_type=args.device, dtype=dtype):
                                 losses.append(
-                                    F.mse_loss(
+                                    F.l1_loss(
                                         1. - (F.cosine_similarity(signal[b, f], signal[opps[sim_maxi_opp], sim_maxi_opp_frame], dim=0)*0.5 + 0.5),
                                         (1. - (F.cosine_similarity(units[b, f], sim_maxi_opps_centroid, dim=0)*0.5 + 0.5))*args.train.loss_variation)
                                 )
                                 
                                 losses.append(
-                                    F.mse_loss(
+                                    F.l1_loss(
                                         F.cosine_similarity(signal[b, f], signal[opps[sim_mini_opp], sim_mini_opp_frame], dim=0)*0.5 + 0.5,
                                         (F.cosine_similarity(units[b, f], sim_mini_opps_centroid, dim=0)*0.5 + 0.5)*args.train.low_similar_loss_variation)
                                 )
                                 
                         last_hop = torch.randint(args.train.frame_hop_random_min, args.train.frame_hop_random_max, (1,))[0]
+                        # last_hop = 1
                         f += last_hop
                         
                 if len(losses) <= 0:
@@ -284,9 +285,10 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     }
                         
                     # save latest
-                    saver.save_model(model, optimizer_save, postfix=f'{saver.global_step}', states=states)
+                    saver.save_model(model, optimizer_save, postfix=f'_{saver.global_step}', states=states)
                     
-            scheduler.step(loss)
+            # scheduler.step(loss)
+                scheduler.step()
         return
     else:   # args.train.only_u2c_stack
         # freeze against last fc of stack
@@ -305,6 +307,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     saver.log_info(params_count)
     saver.log_info('======= start training =======')
     for epoch in range(args.train.epochs):
+        saver.global_epoch_increment()
         for batch_idx, data in enumerate(loader_train):
             saver.global_step_increment()
             optimizer.zero_grad()
@@ -365,7 +368,9 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 loss_fm = feature_loss(fmap_real, fmap_gen)
                 loss_gen, losses_gen = generator_loss(d_signal_gen)
                 
-                losses.extend((loss_gen*0.5, loss_fm*0.05))    # TODO: parametrize
+                # losses.extend((loss_gen*0.5, loss_fm*0.05))    # TODO: parametrize
+                # losses.extend((loss_gen, loss_fm*0.05))    # TODO: parametrize
+                losses.extend((loss_gen*0.1, loss_fm*0.05))    # TODO: parametrize
                 
             loss = torch.stack(losses).sum()
                 
@@ -477,5 +482,6 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             scheduler.step(loss)
         else:
             scheduler.step()
+            scheduler_d.step()
 
                           

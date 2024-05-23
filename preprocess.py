@@ -59,6 +59,7 @@ if __name__ == '__main__':
         speaker_embed_encoder=args.data.spk_embed_encoder,
         speaker_embed_encoder_path=args.data.spk_embed_encoder_ckpt,
         speaker_embed_encoder_sample_rate=args.data.spk_embed_encoder_sample_rate,
+        per_file_speaker_embed=args.data.per_file_speaker_embed,
         units_encoder=args.data.encoder,
         units_encoder_path=args.data.encoder_ckpt,
         units_encoder_sample_rate=args.data.encoder_sample_rate,

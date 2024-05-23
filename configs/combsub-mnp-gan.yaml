@@ -1,0 +1,78 @@
+data:
+  f0_extractor: 'rmvpe' # 'dio', 'harvest', 'crepe', 'rmvpe' or 'fcpe'
+  f0_min: 65 # about C2
+  f0_max: 1200 # about D6
+  sampling_rate: 44100
+  block_size: 512 # Equal to hop_length
+  duration: 1.8 # Audio duration during training, must be less than the duration of the shortest audio clip
+  encoder: 'dpwavlmbase' # 'dpwavlmbase' or 'wavlmbase'
+  encoder_sample_rate: 16000
+  encoder_hop_size: 320
+  encoder_out_channels: 768
+  encoder_ckpt: models/pretrained/dphubert/DPWavLM-sp0.75.pth
+  spk_embed_encoder: 'pyannote.audio' # 'pyannote.audio' or 'resemblyzer'
+  spk_embed_encoder_ckpt: ./models/pretrained/pyannote.audio/wespeaker-voxceleb-resnet34-LM/pytorch_model.bin
+  spk_embed_encoder_sample_rate: 16000
+  spk_embed_channels: 256
+  volume_window_size: 8
+  dataset_path: dataset # Create a folder named "audio" under this path and put the audio clip in it
+  extensions: # List of extension included in the data collection
+    - wav
+model:
+  type: 'CombSubMinimumNoisedPhase'
+  win_length: 2048
+  units_layers:
+    - [10, 11]
+  units_hidden_channels: 256
+  f0_input_variance: 0.0
+  f0_offset_size_downsamples: 8
+  noise_env_size_downsamples: 8
+  harmonic_env_size_downsamples: 8
+  noise_to_harmonic_phase: true
+  use_harmonic_env: false
+  use_noise_env: true
+  use_f0_offset: true
+  noise_seed: 289
+  use_speaker_embed: true # set false when you don't wanna use speaker embed
+  no_use_embed_conv: false
+  # n_spk: 768 # max number of different speakers when use_speaker_embed==false
+  add_noise: true
+  use_discriminator: true
+loss:
+  fft_min: 256
+  fft_max: 2048
+  use_dual_scale: false
+  use_dual_scale_log_freq: true
+  n_scale: 4 # rss kernel numbers
+  beta: 0.8
+  overlap: 0.5
+device: cuda
+env:
+  expdir: dataset/exp/combsub-mnp
+  gpu_id: 0
+train:
+  num_workers: 2 # If your cpu and gpu are both very strong, set to 0 may be faster!
+  amp_dtype: fp32 # fp32, fp16 or bf16 (fp16 or bf16 may be faster if it is supported by your gpu)
+  batch_size: 48
+  cache_all_data: true # Save Internal-Memory or Graphics-Memory if it is false, but may be slow
+  cache_device: 'cpu' # Set to 'cuda' to cache the data into the Graphics-Memory, fastest speed for strong gpu
+  cache_fp16: true
+  epochs: 100000
+  interval_log: 5
+  interval_val: 1000
+  lr: 0.0005
+  weight_decay: 0
+  sched_factor: 0.5
+  sched_patience: 100
+  sched_threshold: 0.0001
+  sched_threshold_mode: 'rel'
+  sched_cooldown: 2
+  sched_min_lr: 0.000005
+  sched_gamma: 0.99998
+  save_opt: false
+  only_u2c_stack: false # Set true when pre-training the unit2ctrl unit conv stacks
+  # only necessary when training the unit2ctrl unit conv stacks below
+  frame_hop_random_min: 32
+  frame_hop_random_max: 64
+  loss_variation: 0.1
+  low_similar_loss_variation: 0.7

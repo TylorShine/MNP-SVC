@@ -21,6 +21,7 @@ class PreprocessorParameters:
                  speaker_embed_encoder: str = 'pyannote.audio',
                  speaker_embed_encoder_path: str = 'pyannote/wespeaker-voxceleb-resnet34-LM',
                  speaker_embed_encoder_sample_rate: int = 16000,
+                 per_file_speaker_embed = False,
                  units_encoder: str = 'dpwavlmbase',
                  units_encoder_path: str = 'models/pretrained/dphubert/DPWavLM-sp0.75.pth',
                  units_encoder_sample_rate: int = 16000,
@@ -36,6 +37,7 @@ class PreprocessorParameters:
             'data_dir': data_dir,
             'sample_rate': sample_rate,
             'block_size': block_size,
+            'per_file_speaker_embed': per_file_speaker_embed,
             'device': device,
         }
         
@@ -125,6 +127,7 @@ def preprocess_main(root_path: str, dataset: dict[str, dict[str, str]], params: 
 def preprocess_spkinfo(root_path: str, dataset: dict[str, dict[str, str]], split: str = "", params: PreprocessorParameters = PREPROCESSOR_PARAMS):
     speaker_embed_encoder = SpeakerEmbedEncoder(**params.speaker_embed_encoder)
     speaker_ids = set([c['spk_id'] for c in dataset.values()])
+    
     speaker_path_dict = {
         # i: [p['path'] for p, id in zip(examples['audio'], examples['spk_id']) if id == i]
         i: [os.path.join(root_path, p) for p, c in dataset.items() if c['spk_id'] == i]
@@ -143,6 +146,16 @@ def preprocess_spkinfo(root_path: str, dataset: dict[str, dict[str, str]], split
         spk_info_name = f'spk_info_{split}.npz'
     
     np.savez_compressed(os.path.join(params.common['data_dir'], spk_info_name), **speaker_embed_dict)
+    
+    if params.common['per_file_speaker_embed']:
+        spk_embed_dir = os.path.join(params.common['data_dir'], 'spk_embed')
+        for path in tqdm(dataset.keys(), desc='Extract speaker embed'):
+            audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+            spk_embed = speaker_embed_encoder.encode(torch.from_numpy(audio).unsqueeze(0).to(params.common['device']), sr)
+            # f0_path = os.path.join(f0_dir, os.path.relpath(path, start=data_dir))
+            spk_embed_path = os.path.join(spk_embed_dir, os.path.relpath(path, start='data'))
+            os.makedirs(os.path.dirname(spk_embed_path), exist_ok=True)
+            np.savez_compressed(f'{spk_embed_path}.npz', spk_embed=spk_embed)
     
     
 if __name__ == '__main__':

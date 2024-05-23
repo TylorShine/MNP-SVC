@@ -40,10 +40,12 @@ class AudioDataset(TorchDataset):
         whole_audio=False,
         # extensions=['wav'],
         # n_spk=1,
+        cache_all_data=True,
         device='cpu',
         fp16=False,
         use_aug=False,
         use_spk_embed=False,
+        per_file_spk_embed=False,
         units_only=False,
     ):
         super().__init__()
@@ -55,6 +57,7 @@ class AudioDataset(TorchDataset):
         self.whole_audio = whole_audio
         self.use_aug = use_aug
         self.use_spk_embed = use_spk_embed
+        self.per_file_spk_embed = per_file_spk_embed
         
         self.units_only = units_only
         
@@ -88,13 +91,14 @@ class AudioDataset(TorchDataset):
                 }
         else:
             if use_spk_embed:
-                spk_info_path = os.path.join(root_path, 'spk_info.npz')
-                spk_infos = np.load(spk_info_path, allow_pickle=True)
-                spk_ids = set((i for i in spk_infos.files))
-                self.spk_embeds = {
-                    k: spk_infos[k].item()['spk_embed']
-                    for k in spk_ids
-                }
+                if not self.per_file_spk_embed:
+                    spk_info_path = os.path.join(root_path, 'spk_info.npz')
+                    spk_infos = np.load(spk_info_path, allow_pickle=True)
+                    spk_ids = set((i for i in spk_infos.files))
+                    self.spk_embeds = {
+                        k: spk_infos[k].item()['spk_embed']
+                        for k in spk_ids
+                    }
                 
             for idx, file in enumerate(tqdm(self.paths, total=len(self.paths), desc='loading data')):
                 audio_path = os.path.join(root_path, file)
@@ -114,35 +118,45 @@ class AudioDataset(TorchDataset):
                 f0 = np.load(f0_path)['f0']
                 f0 = torch.from_numpy(f0).float().unsqueeze(-1).to(device)
                 
-                # load audio
-                audio, sr = librosa.load(audio_path, sr=sampling_rate)
-                audio = torch.from_numpy(audio).to(device)
+                if cache_all_data:
+                    # load audio
+                    audio, sr = librosa.load(audio_path, sr=sampling_rate)
+                    audio = torch.from_numpy(audio).to(device)
                 
                 # load volume
                 volume_path = os.path.join(self.root_path, 'volume', file_rel, file_name) + '.npz'
                 volume = np.load(volume_path)['volume']
                 volume = torch.from_numpy(volume).float().unsqueeze(-1).to(device)
                 
-                # load units
-                units_dir = os.path.join(self.root_path, 'units', file_rel, file_name) + '.npz'
-                units = np.load(units_dir)['units']
-                units = torch.from_numpy(units).to(device)
+                if cache_all_data:
+                    # load units
+                    units_dir = os.path.join(self.root_path, 'units', file_rel, file_name) + '.npz'
+                    units = np.load(units_dir)['units']
+                    units = torch.from_numpy(units).to(device)
                 
-                if fp16:
+                if cache_all_data and fp16:
                     audio = audio.half()
                     units = units.half()
                 
                 self.data_buffer[file] = {
                     'duration': duration,
-                    'audio': audio,
-                    'units': units,
                     'f0': f0,
                     'volume': volume,
                     'spk_id': torch.LongTensor(np.array([int(metadatas[file]['spk_id'])])).to(device),
                 }
                 
+                if cache_all_data:
+                    self.data_buffer[file]['audio'] = audio
+                    self.data_buffer[file]['units'] = units
+                
                 if use_spk_embed:
-                    self.data_buffer[file]['spk_embed'] = self.spk_embeds[metadatas[file]['spk_id']]
+                    if not self.per_file_spk_embed:
+                        self.data_buffer[file]['spk_embed'] = self.spk_embeds[metadatas[file]['spk_id']]
+                    else:
+                        # load speaker embed
+                        spk_embed_path = os.path.join(self.root_path, 'spk_embed', file_rel, file_name) + '.npz'
+                        spk_embed = np.load(spk_embed_path)['spk_embed']
+                        self.data_buffer[file]['spk_embed'] = torch.from_numpy(spk_embed).float().unsqueeze(-1).to(device)
                     
         if len(skip_index) > 0:
             print(f"skip {len(skip_index)} files.")
@@ -173,7 +187,16 @@ class AudioDataset(TorchDataset):
         units_frame_len = int(crop_duration / frame_resolution)
         
         # load units
-        units = data_buffer['units'][start_frame : start_frame + units_frame_len]
+        if 'units' in data_buffer.keys():
+            units = data_buffer['units'][start_frame : start_frame + units_frame_len]
+        else:
+            # load units
+            file_dir, file_name = os.path.split(file)
+            file_rel = os.path.relpath(file_dir, start='data')
+            units_dir = os.path.join(self.root_path, 'units', file_rel, file_name) + '.npz'
+            units = np.load(units_dir)['units'][start_frame : start_frame + units_frame_len]
+            units = torch.from_numpy(units).to(self.device)
+            
         # load spk_id
         spk_id = data_buffer['spk_id']
         
@@ -181,7 +204,13 @@ class AudioDataset(TorchDataset):
             return dict(spk_id=spk_id, units=units)
         
         # load audio
-        audio = data_buffer['audio'][start_frame*self.hop_size:(start_frame + units_frame_len)*self.hop_size]
+        if 'audio' in data_buffer.keys():
+            audio = data_buffer['audio'][start_frame*self.hop_size:(start_frame + units_frame_len)*self.hop_size]
+        else:
+            # load audio
+            audio_path = os.path.join(self.root_path, file)
+            audio, sr = librosa.load(audio_path, sr=self.sampling_rate)
+            audio = torch.from_numpy(audio[start_frame*self.hop_size:(start_frame + units_frame_len)*self.hop_size]).to(self.device)
         
         # load f0
         f0 = data_buffer['f0'][start_frame : start_frame + units_frame_len]

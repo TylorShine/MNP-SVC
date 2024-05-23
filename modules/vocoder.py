@@ -187,11 +187,16 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         self.register_buffer("use_harmonic_env", torch.tensor(use_harmonic_env))
         self.register_buffer("use_noise_env", torch.tensor(use_noise_env))
         self.register_buffer("noise_to_harmonic_phase", torch.tensor(noise_to_harmonic_phase))
-        self.register_buffer("add_noise", torch.tensor(add_noise))
+        # self.register_buffer("add_noise", torch.tensor(add_noise))
         self.register_buffer("use_f0_offset", torch.tensor(use_f0_offset))
         self.register_buffer("use_speaker_embed", torch.tensor(use_speaker_embed))
         self.register_buffer("use_embed_conv", torch.tensor(use_embed_conv))
         self.register_buffer("noise_seed", torch.tensor(noise_seed))
+        
+        if add_noise is None:
+            self.add_noise = add_noise
+        else:
+            self.register_buffer("add_noise", torch.tensor(add_noise))
         
         #Unit2Control
         self.pred_filter_size = win_length // 2 + 1
