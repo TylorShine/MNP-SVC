@@ -84,6 +84,7 @@ class Unit2ControlGE2E(nn.Module):
                 nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
                 nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Linear(spk_embed_channels, n_hidden_channels)
+            self.recon_spk_embed = nn.Linear(spk_embed_channels, conv_stack_middle_size)
         else:
             if use_embed_conv:
                 self.spk_embed_conv = nn.Sequential(
@@ -98,6 +99,7 @@ class Unit2ControlGE2E(nn.Module):
                 nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
                 nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Embedding(n_spk, n_hidden_channels)
+            self.recon_spk_embed = nn.Embedding(n_spk, conv_stack_middle_size)
         if use_pitch_aug:
             self.aug_shift_embed = nn.Linear(1, n_hidden_channels, bias=False)
         else:
@@ -110,10 +112,19 @@ class Unit2ControlGE2E(nn.Module):
                     Transpose((2, 1)),
                     LayerNorm1d(conv_stack_middle_size, eps=1e-6),
                     nn.GELU(),
-                    GRN(conv_stack_middle_size)),
-                nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+                    GRN(conv_stack_middle_size)),)
+                # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
         nn.init.normal_(self.stack[-1].weight, 0, 0.01)
         nn.init.constant_(self.stack[-1].bias, 0)
+        
+        # feature reconstructor
+        self.recon = nn.Sequential(
+            ConvNeXtV2LikeEncoder(
+                num_layers=3,
+                dim_model=conv_stack_middle_size,
+                kernel_size=7,
+                bottoleneck_dilation=2),
+            nn.Linear(conv_stack_middle_size, n_hidden_channels))
 
         # transformer
         self.decoder = ConvNeXtV2LikeEncoder(
@@ -189,7 +200,7 @@ class Unit2ControlGE2E(nn.Module):
                 else:
                     x = x + self.spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
                 
-        x = x + self.stack(units.transpose(2, 1))
+        x = x + self.recon(self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id))
         
         x = self.decoder(x)
         x = self.norm(x)
@@ -296,3 +307,46 @@ class Unit2ControlStackOnly(nn.Module):
         
     def forward(self, units):
         return self.stack(units.transpose(2, 1))
+    
+    
+class Unit2ControlStackAndFeatureRecon(nn.Module):
+    def __init__(
+        self,
+        input_channel,
+        spk_embed_channels,
+        n_hidden_channels=256,
+        n_spk=1024,
+        conv_stack_middle_size=32,
+        use_spk_embed=True,
+        ):
+        super().__init__()
+        
+        self.n_hidden_channels = n_hidden_channels
+        
+        if use_spk_embed:
+            self.recon_spk_embed = nn.Linear(spk_embed_channels, conv_stack_middle_size)
+        else:
+            self.recon_spk_embed = nn.Embedding(n_spk, conv_stack_middle_size)
+        
+        self.stack = nn.Sequential(
+                nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
+                nn.Sequential(
+                    Transpose((2, 1)),
+                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
+                    nn.GELU(),
+                    GRN(conv_stack_middle_size)))
+                # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+        self.recon = nn.Sequential(
+            ConvNeXtV2LikeEncoder(
+                num_layers=3,
+                dim_model=conv_stack_middle_size,
+                kernel_size=7,
+                bottoleneck_dilation=2),
+            nn.Linear(conv_stack_middle_size, n_hidden_channels))
+                
+        nn.init.kaiming_normal_(self.stack[0].weight)
+        
+    def forward(self, units, spk_id):
+        return self.recon(
+            self.stack(units.transpose(2, 1))
+            + self.recon_spk_embed(spk_id))
