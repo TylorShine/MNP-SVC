@@ -114,8 +114,8 @@ class Unit2ControlGE2E(nn.Module):
                     nn.GELU(),
                     GRN(conv_stack_middle_size)),)
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
-        nn.init.normal_(self.stack[-1].weight, 0, 0.01)
-        nn.init.constant_(self.stack[-1].bias, 0)
+        # nn.init.normal_(self.stack[-1].weight, 0, 0.01)
+        # nn.init.constant_(self.stack[-1].bias, 0)
         
         # feature reconstructor
         self.recon = nn.Sequential(
@@ -125,6 +125,8 @@ class Unit2ControlGE2E(nn.Module):
                 kernel_size=7,
                 bottoleneck_dilation=2),
             nn.Linear(conv_stack_middle_size, n_hidden_channels))
+        nn.init.normal_(self.recon[-1].weight, 0, 0.01)
+        nn.init.constant_(self.recon[-1].bias, 0)
 
         # transformer
         self.decoder = ConvNeXtV2LikeEncoder(
