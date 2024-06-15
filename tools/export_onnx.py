@@ -68,6 +68,7 @@ if __name__ == '__main__':
             harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
             use_harmonic_env=args.model.use_harmonic_env,
             use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
             noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
             use_f0_offset=args.model.use_f0_offset,
             use_pitch_aug=args.model.use_pitch_aug,

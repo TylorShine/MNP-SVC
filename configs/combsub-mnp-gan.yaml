@@ -29,7 +29,7 @@ model:
   noise_env_size_downsamples: 8
   harmonic_env_size_downsamples: 8
   noise_to_harmonic_phase: true
-  use_harmonic_env: false
+  use_harmonic_env: true
   use_noise_env: true
   use_f0_offset: true
   noise_seed: 289
@@ -39,12 +39,14 @@ model:
   add_noise: true
   use_discriminator: true
 loss:
-  fft_min: 256
+  fft_min: 128
   fft_max: 2048
   use_dual_scale: false
-  use_dual_scale_log_freq: true
+  use_dual_scale_log_freq: false
+  use_dual_scale_log_freq_magphase: true
   n_scale: 4 # rss kernel numbers
-  beta: 0.8
+  beta: 0.7
+  gamma: 0.005
   overlap: 0.5
 device: cuda
 env:
@@ -67,7 +69,7 @@ train:
   sched_threshold: 0.0001
   sched_threshold_mode: 'rel'
   sched_cooldown: 2
-  sched_min_lr: 0.000005
+  sched_min_lr: 0.00001
   sched_gamma: 0.99998
   save_opt: false
   only_u2c_stack: false # Set true when pre-training the unit2ctrl unit conv stacks

@@ -9,7 +9,10 @@ from modules.dataset.loader import get_data_loaders
 from modules.solver import train
 from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly
 from modules.discriminator import MultiSpecDiscriminator
-from modules.loss import RSSLoss, DSSLoss, DLFSSLoss
+from modules.loss import RSSLoss, DSSLoss, DLFSSLoss, DLFSSMPLoss
+
+
+torch.backends.cudnn.benchmark = True
 
 
 def parse_args(args=None, namespace=None):
@@ -58,8 +61,10 @@ if __name__ == '__main__':
                 harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
                 use_harmonic_env=args.model.use_harmonic_env,
                 use_noise_env=args.model.use_noise_env,
+                use_add_noise_env=args.model.use_add_noise_env,
                 noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
                 add_noise=args.model.add_noise,
+                use_phase_offset=args.model.use_phase_offset,
                 use_f0_offset=args.model.use_f0_offset,
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
@@ -110,6 +115,9 @@ if __name__ == '__main__':
     elif args.loss.use_dual_scale_log_freq:
         loss_func = DLFSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_magphase:
+        loss_func = DLFSSMPLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
     else:
         loss_func = RSSLoss(args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, device=args.device)
         
@@ -118,7 +126,7 @@ if __name__ == '__main__':
         # load discriminator model parameters
         optimizer_d = torch.optim.AdamW(model_d.parameters())
         _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
-        lr = args.train.lr if states is None else states['last_lr'][0]
+        lr = args.train.lr*2. if states is None else states['last_lr'][0]
         
         for param_group in optimizer_d.param_groups:
             param_group['initial_lr'] = args.train.lr
@@ -128,7 +136,7 @@ if __name__ == '__main__':
         # scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
         #                                                          threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
         #                                                          cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
+        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*2.)
     
         if states is not None:
             sched_states = states.get('scheduler')

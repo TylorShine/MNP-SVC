@@ -53,7 +53,8 @@ class ConvNeXtV2LikeBlock(nn.Module):
             Transpose((2, 1)),
             LayerNorm1d(dim),
             nn.Linear(dim, dim * bottoleneck_dilation),
-            nn.GELU(),
+            # nn.GELU(),
+            nn.CELU(),
             GRN(dim * bottoleneck_dilation),
             nn.Linear(dim * bottoleneck_dilation, dim),
             Transpose((2, 1))

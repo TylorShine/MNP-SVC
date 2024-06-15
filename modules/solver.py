@@ -41,7 +41,7 @@ def test(args, model, loss_func, loader_test, saver):
 
                 # forward
                 st_time = time.time()
-                signal = model(units, data['f0'], data['volume'], data[spk_id_key])
+                signal, _ = model(units, data['f0'], data['volume'], data[spk_id_key])
                 ed_time = time.time()
 
                 # crop
@@ -297,6 +297,11 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 param_name.startswith('unit2ctrl.stack.1.'):
                 param.requires_grad = False
     
+    freeze_model = False
+    if freeze_model:
+        for param_name, param in model.named_parameters():
+            param.requires_grad = False
+
     
     # model size
     model_dict = {'model': model}
@@ -324,15 +329,15 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             f0 = data['f0']
             volume = data['volume']
             audio = data['audio']
-            
+
             # forward
             if dtype == torch.float32:
-                signal = model(units.float(), f0, volume, data[spk_id_key],
+                signal, _ = model(units.float(), f0, volume, data[spk_id_key],
                                               infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
             else:
                 with autocast(device_type=args.device, dtype=dtype):
-                    signal = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    signal, _ = model(units.to(dtype), f0, volume, data[spk_id_key],
                                                   infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
 
@@ -368,27 +373,29 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 loss_fm = feature_loss(fmap_real, fmap_gen)
                 loss_gen, losses_gen = generator_loss(d_signal_gen)
                 
-                # losses.extend((loss_gen*0.5, loss_fm*0.05))    # TODO: parametrize
-                # losses.extend((loss_gen, loss_fm*0.05))    # TODO: parametrize
-                losses.extend((loss_gen*0.1, loss_fm*0.05))    # TODO: parametrize
+                losses.extend((loss_gen*0.5, loss_fm*0.02))    # TODO: parametrize
                 
             loss = torch.stack(losses).sum()
                 
-            # handle nan loss
-            if torch.isnan(loss):
-                raise ValueError(' [x] nan loss ')
-            else:
-                # backpropagate
-                if dtype == torch.float32:
-                    loss.backward()
-                    torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
-                    optimizer.step()
+            if not freeze_model:
+                # handle nan loss
+                if torch.isnan(loss):
+                    raise ValueError(' [x] nan loss ')
                 else:
-                    scaler.scale(loss).backward()
-                    scaler.unscale_(optimizer)
-                    torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
-                    scaler.step(optimizer)
-                    scaler.update()
+                    # backpropagate
+                    if dtype == torch.float32:
+                        loss.backward()
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
+                        optimizer.step()
+                    else:
+                        scaler.scale(loss).backward()
+                        scaler.unscale_(optimizer)
+                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
+                        scaler.step(optimizer)
+                        scaler.update()
+            elif model_d is not None and dtype != torch.float32:
+                scaler.update()
+
 
 
             # log loss

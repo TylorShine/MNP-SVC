@@ -69,6 +69,7 @@ class Unit2ControlGE2E(nn.Module):
         self.n_hidden_channels = n_hidden_channels
         self.spk_embed_channels = spk_embed_channels
         self.use_spk_embed = use_spk_embed
+        self.conv_stack_middle_size = conv_stack_middle_size
         if use_spk_embed:
             # TODO: experiment with what happens if we don't use embed convs
             if use_embed_conv:
@@ -77,7 +78,8 @@ class Unit2ControlGE2E(nn.Module):
                     nn.Sequential(
                         Transpose((2, 1)),
                         LayerNorm1d(embed_conv_channels, eps=1e-6),
-                        nn.GELU(),
+                        # nn.GELU(),
+                        nn.CELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
                 nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
@@ -92,7 +94,8 @@ class Unit2ControlGE2E(nn.Module):
                     nn.Sequential(
                         Transpose((2, 1)),
                         LayerNorm1d(embed_conv_channels, eps=1e-6),
-                        nn.GELU(),
+                        # nn.GELU(),
+                        nn.CELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
                 nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
@@ -169,13 +172,13 @@ class Unit2ControlGE2E(nn.Module):
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed_conv(
                             self.spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
-                            f0_emb.transpose(2, 1) + 
+                            f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
                 else:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed_conv(
                             self.spk_embed(spk_id[i]).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
-                            f0_emb.transpose(2, 1) + 
+                            f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
             else:
                 if self.use_spk_embed:
@@ -202,7 +205,8 @@ class Unit2ControlGE2E(nn.Module):
                 else:
                     x = x + self.spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
                 
-        x = x + self.recon(self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id))
+        recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
+        x = x + self.recon[-1](recon)
         
         x = self.decoder(x)
         x = self.norm(x)
@@ -210,7 +214,7 @@ class Unit2ControlGE2E(nn.Module):
         
         controls = split_to_dict(e, self.output_splits)
         
-        return controls, x
+        return controls, recon
     
     
 class Unit2ControlGE2E_export(Unit2ControlGE2E):

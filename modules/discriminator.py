@@ -22,7 +22,8 @@ class DiscriminatorSpec(torch.nn.Module):
     ) -> None:
         super(DiscriminatorSpec, self).__init__()
         self.period = period
-        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
+        # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
+        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
         self.convs = nn.ModuleList(
@@ -45,6 +46,7 @@ class DiscriminatorSpec(torch.nn.Module):
                         padding=(get_keep_size_padding(kernel_size, 1), 2),
                     )
                 ),
+                
                 # norm_f(
                 #     Conv2d(
                 #         32,
@@ -63,6 +65,7 @@ class DiscriminatorSpec(torch.nn.Module):
                 #         padding=(get_keep_size_padding(kernel_size, 1), 2),
                 #     )
                 # ),
+                
                 norm_f(
                     Conv2d(
                         32,
@@ -75,14 +78,49 @@ class DiscriminatorSpec(torch.nn.Module):
             ]
         )
         self.conv_post = norm_f(Conv2d(32, 1, (3, 1), 1, padding=(1, 0)))
+        
+        self.convs_p = nn.ModuleList(
+            [
+                norm_f(
+                    Conv2d(
+                        1,
+                        16,
+                        (kernel_size, 7),
+                        (stride, 2),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
+                    )
+                ),
+                norm_f(
+                    Conv2d(
+                        16,
+                        32,
+                        (kernel_size, 7),
+                        (stride, 2),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
+                    )
+                ),
+                
+                norm_f(
+                    Conv2d(
+                        32,
+                        32,
+                        (kernel_size, 3),
+                        (1, 1),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
+                    )
+                ),
+            ]
+        )
+        self.conv_p_post = norm_f(Conv2d(32, 1, (3, 1), 1, padding=(1, 0)))
 
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
 
         with torch.no_grad():
             x = self.spec(x)
+            x, xp = torch.sqrt(x.real**2. + x.imag**2.), torch.atan2(x.imag, x.real)
 
-        for layer in self.convs:
+        for i, layer in enumerate(self.convs):
             x = layer(x)
             fmap.append(x)
             x = F.leaky_relu(x, 0.1)
@@ -90,8 +128,18 @@ class DiscriminatorSpec(torch.nn.Module):
         x = self.conv_post(x)
         fmap.append(x)
         x = torch.flatten(x, 1, -1)
+        
+        for i, layer in enumerate(self.convs_p):
+            xp = layer(xp)
+            fmap.append(xp)
+            xp = F.leaky_relu(xp, 0.1)
+            # fmap.append(x)
+        xp = self.conv_p_post(xp)
+        fmap.append(xp)
+        xp = torch.flatten(xp, 1, -1)
 
-        return x, fmap
+        # return x, fmap
+        return x + xp, fmap
 
 
 class DiscriminatorS(torch.nn.Module):
@@ -115,7 +163,7 @@ class DiscriminatorS(torch.nn.Module):
     def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
 
-        for layer in self.convs:
+        for i, layer in enumerate(self.convs):
             x = layer(x)
             fmap.append(x)
             x = F.leaky_relu(x, 0.1)
@@ -133,7 +181,18 @@ class MultiSpecDiscriminator(torch.nn.Module):
         # periods = [61, 89, 131, 193, 283]
         # periods = [31, 89, 467]
         # periods = [173, 337, 673]
-        periods = [62, 178, 346]
+        # periods = [62, 178, 346]
+        # periods = [14, 46, 178, 746]    # 7*2, (first prime of < [n-1]*2)*2...
+        # periods = [10, 46, 178, 746]    # 5*2, (first prime of < [n-1]*2)*2...
+        # periods = [4, 10, 46, 178, 746]    # 4, 5*2, (first prime of < [n-1]*2)*2...
+        # periods = [4, 7, 13, 178, 746]    # 4, 5*2, (first prime of < [n-1]*2)*2...
+        # periods = [4, 6, 22, 82, 326]    # 4, 6, (first prime of < [n-1]*2)*2...
+        # periods = [4, 6, 14, 46, 746]    # 4, 6, (first prime of < [n-1]*2)*2...
+        # periods = [4, 7, 46, 512]    # 4, 6, (first prime of < [n-1]*2)*2...
+        # periods = [8, 14, 46, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
+        # periods = [8, 14, 46, 178, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
+        # periods = [10, 18, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
+        periods = [10, 14, 46, 178, 768]    # 10, 14, (first prime of < [n-1]*2)*2...
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [
