@@ -173,7 +173,7 @@ if __name__ == '__main__':
     
     
     # copy spk_info
-    if args.model.use_speaker_embed:
+    if args.model.use_speaker_embed and not args.train.only_u2c_stack:
         shutil.copy2(os.path.join(args.data.dataset_path, 'spk_info.npz'), os.path.join(args.env.expdir, 'spk_info.npz'))
     
     
