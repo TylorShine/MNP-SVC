@@ -374,6 +374,9 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
                 x += initial_phase.to(x) / 2 / torch.pi
             x = x - torch.round(x)
             x = x.to(f0)
+            
+        xh = x + 0.5
+        xh = xh - torch.round(xh)
         
         
         # exciter phase
@@ -395,9 +398,14 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         combtooth = torch.where(x.roll(1) - x < 0., 1., 0.)
         combtooth = combtooth.squeeze(-1)
         
+        # inverted and half unit delayed delta
+        combtooth_inv = torch.where(xh.roll(1) - xh < 0., -1., 0.)
+        combtooth_inv = combtooth_inv.squeeze(-1)
+                
         if self.use_harmonic_env:
             # TODO: scale by log10 now, but necessary?
-            harmonic_env_flat = (torch.log10(torch.clamp(ctrls['harmonic_envelope_magnitude'], min=0.0)*9. + 1.) + 1.).flatten(1)
+            # harmonic_env_flat = (torch.log10(torch.clamp(ctrls['harmonic_envelope_magnitude'], min=0.0)*9. + 1.) + 1.).flatten(1)
+            harmonic_env_flat = (torch.log10(torch.clamp(ctrls['harmonic_envelope_magnitude'], min=0.0)*9. + 1.)).flatten(1)
             
             # lazy, not accurate, but fast linear interpolation
             # repeat a last sample
@@ -410,7 +418,11 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             harmonic_env = harmonic_env_flat.unsqueeze(-1).repeat(1, 1, self.harmonic_env_size_downsamples).flatten(1) + harmonic_env_slopes*harmonic_env_repeat_idx/self.harmonic_env_size_downsamples
             
             # apply it to source
-            combtooth *= harmonic_env
+            # combtooth *= harmonic_env
+            combtooth_inv *= harmonic_env
+            
+        # sum
+        combtooth += combtooth_inv
 
         pad_mode = 'constant'
         

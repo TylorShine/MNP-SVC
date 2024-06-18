@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.parametrizations import weight_norm
 
-from .convnext_v2_like import GRN, LayerNorm1d, ConvNeXtV2LikeEncoder
+from .convnext_v2_like import GRN, ConvNeXtV2LikeEncoder, ConvNeXtV2GLULikeEncoder
 
 
 def split_to_dict(tensor, tensor_splits):
@@ -77,7 +77,7 @@ class Unit2ControlGE2E(nn.Module):
                     nn.Conv1d(n_hidden_channels, embed_conv_channels, 3, 1, 1, bias=False),
                     nn.Sequential(
                         Transpose((2, 1)),
-                        LayerNorm1d(embed_conv_channels, eps=1e-6),
+                        nn.LayerNorm(embed_conv_channels, eps=1e-6),
                         # nn.GELU(),
                         nn.CELU(),
                         GRN(embed_conv_channels)),
@@ -93,7 +93,7 @@ class Unit2ControlGE2E(nn.Module):
                     nn.Conv1d(n_hidden_channels, embed_conv_channels, 3, 1, 1, bias=False),
                     nn.Sequential(
                         Transpose((2, 1)),
-                        LayerNorm1d(embed_conv_channels, eps=1e-6),
+                        nn.LayerNorm(embed_conv_channels, eps=1e-6),
                         # nn.GELU(),
                         nn.CELU(),
                         GRN(embed_conv_channels)),
@@ -113,8 +113,8 @@ class Unit2ControlGE2E(nn.Module):
                 nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
                 nn.Sequential(
                     Transpose((2, 1)),
-                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
-                    nn.GELU(),
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
                     GRN(conv_stack_middle_size)),)
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
         # nn.init.normal_(self.stack[-1].weight, 0, 0.01)
@@ -122,8 +122,9 @@ class Unit2ControlGE2E(nn.Module):
         
         # feature reconstructor
         self.recon = nn.Sequential(
-            ConvNeXtV2LikeEncoder(
-                num_layers=3,
+            ConvNeXtV2GLULikeEncoder(
+                # num_layers=3,
+                num_layers=2,
                 dim_model=conv_stack_middle_size,
                 kernel_size=7,
                 bottoleneck_dilation=2),
@@ -132,7 +133,7 @@ class Unit2ControlGE2E(nn.Module):
         nn.init.constant_(self.recon[-1].bias, 0)
 
         # transformer
-        self.decoder = ConvNeXtV2LikeEncoder(
+        self.decoder = ConvNeXtV2GLULikeEncoder(
             num_layers=3,
             dim_model=n_hidden_channels,
             kernel_size=31,
@@ -305,8 +306,8 @@ class Unit2ControlStackOnly(nn.Module):
                 nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
                 nn.Sequential(
                     Transpose((2, 1)),
-                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
-                    nn.GELU(),
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
                     GRN(conv_stack_middle_size)))
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
         nn.init.kaiming_normal_(self.stack[0].weight)
@@ -338,13 +339,13 @@ class Unit2ControlStackAndFeatureRecon(nn.Module):
                 nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
                 nn.Sequential(
                     Transpose((2, 1)),
-                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
-                    nn.GELU(),
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
                     GRN(conv_stack_middle_size)))
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
         self.recon = nn.Sequential(
-            ConvNeXtV2LikeEncoder(
-                num_layers=3,
+            ConvNeXtV2GLULikeEncoder(
+                num_layers=1,
                 dim_model=conv_stack_middle_size,
                 kernel_size=7,
                 bottoleneck_dilation=2),
