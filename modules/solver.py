@@ -301,7 +301,16 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     if freeze_model:
         for param_name, param in model.named_parameters():
             param.requires_grad = False
-
+            
+    if args.train.ft_spk_embed:
+        for param_name, param in model.named_parameters():
+            if not param_name.startswith('unit2ctrl.spk_embed.'):
+                param.requires_grad = False
+                
+    if args.train.ft_dense_out:
+        for param_name, param in model.named_parameters():
+            if not param_name.startswith('unit2ctrl.dense_out.'):
+                param.requires_grad = False
     
     # model size
     model_dict = {'model': model}
