@@ -31,6 +31,7 @@ model:
   noise_to_harmonic_phase: true
   use_harmonic_env: true
   use_noise_env: true
+  use_add_noise_env: true
   use_f0_offset: true
   noise_seed: 289
   use_speaker_embed: true # set false when you don't wanna use speaker embed
@@ -46,7 +47,7 @@ loss:
   use_dual_scale_log_freq_magphase: true
   n_scale: 4 # rss kernel numbers
   beta: 0.7
-  gamma: 0.005
+  gamma: 0.05
   overlap: 0.5
 device: cuda
 env:
@@ -62,15 +63,15 @@ train:
   epochs: 100000
   interval_log: 5
   interval_val: 1000
-  lr: 0.0005
+  lr: 0.0003
   weight_decay: 0
   sched_factor: 0.5
   sched_patience: 100
   sched_threshold: 0.0001
   sched_threshold_mode: 'rel'
   sched_cooldown: 2
-  sched_min_lr: 0.00001
-  sched_gamma: 0.99998
+  sched_min_lr: 0.00018
+  sched_gamma: 0.9998
   save_opt: false
   only_u2c_stack: false # Set true when pre-training the unit2ctrl unit conv stacks
   # only necessary when training the unit2ctrl unit conv stacks below
