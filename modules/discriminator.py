@@ -7,6 +7,8 @@ from torch.nn.utils import spectral_norm, weight_norm
 
 import torchaudio
 
+from .san_modules import SANConv1d, SANConv2d
+
 
 def get_keep_size_padding(kernel_size: int, dilation: int):
     return (kernel_size - 1) * dilation // 2
@@ -77,7 +79,7 @@ class DiscriminatorSpec(torch.nn.Module):
                 ),
             ]
         )
-        self.conv_post = norm_f(Conv2d(32, 1, (3, 1), 1, padding=(1, 0)))
+        self.conv_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
         
         self.convs_p = nn.ModuleList(
             [
@@ -111,9 +113,11 @@ class DiscriminatorSpec(torch.nn.Module):
                 ),
             ]
         )
-        self.conv_p_post = norm_f(Conv2d(32, 1, (3, 1), 1, padding=(1, 0)))
+        self.conv_p_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    def forward(self,
+                x: torch.Tensor,
+                flg_train: bool = False) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
 
         with torch.no_grad():
@@ -125,21 +129,37 @@ class DiscriminatorSpec(torch.nn.Module):
             fmap.append(x)
             x = F.leaky_relu(x, 0.1)
             # fmap.append(x)
-        x = self.conv_post(x)
-        fmap.append(x)
-        x = torch.flatten(x, 1, -1)
+        x = self.conv_post(x, flg_train=flg_train)
+        if flg_train:
+            x_fun, x_dir = x
+            fmap.append(x_fun)
+            x_fun = torch.flatten(x_fun, 1, -1)
+            x_dir = torch.flatten(x_dir, 1, -1)
+            x = [x_fun, x_dir]
+        else:
+            fmap.append(x)
+            x = torch.flatten(x, 1, -1)
         
         for i, layer in enumerate(self.convs_p):
             xp = layer(xp)
             fmap.append(xp)
             xp = F.leaky_relu(xp, 0.1)
             # fmap.append(x)
-        xp = self.conv_p_post(xp)
-        fmap.append(xp)
-        xp = torch.flatten(xp, 1, -1)
+        xp = self.conv_p_post(xp, flg_train=flg_train)
+        if flg_train:
+            xp_fun, xp_dir = xp
+            fmap.append(xp_fun)
+            xp_fun = torch.flatten(xp_fun, 1, -1)
+            xp_dir = torch.flatten(xp_dir, 1, -1)
+            x[0] = torch.cat((x[0], xp_fun), dim=1)
+            x[1] = torch.cat((x[1], xp_dir), dim=1)
+        else:
+            fmap.append(xp)
+            xp = torch.flatten(xp, 1, -1)
+            x = torch.cat((x, xp), dim=1)
 
         # return x, fmap
-        return x + xp, fmap
+        return x, fmap
 
 
 class DiscriminatorS(torch.nn.Module):
@@ -157,10 +177,12 @@ class DiscriminatorS(torch.nn.Module):
             ]
         )
         # self.conv_post = norm_f(Conv1d(256, 1, 3, 1, padding=1))
-        self.conv_post = norm_f(Conv1d(1024, 1, 3, 1, padding=1))
+        self.conv_post = SANConv1d(1024, 1, 3, 1, padding=1)
         
 
-    def forward(self, x: torch.Tensor) -> tuple[torch.Tensor, list[torch.Tensor]]:
+    def forward(self,
+                x: torch.Tensor,
+                flg_train: bool = False) -> tuple[torch.Tensor, list[torch.Tensor]]:
         fmap = []
 
         for i, layer in enumerate(self.convs):
@@ -168,9 +190,16 @@ class DiscriminatorS(torch.nn.Module):
             fmap.append(x)
             x = F.leaky_relu(x, 0.1)
             # fmap.append(x)
-        x = self.conv_post(x)
-        fmap.append(x)
-        x = torch.flatten(x, 1, -1)
+        x = self.conv_post(x, flg_train=flg_train)
+        if flg_train:
+            x_fun, x_dir = x
+            fmap.append(x_fun)
+            x_fun = torch.flatten(x_fun, 1, -1)
+            x_dir = torch.flatten(x_dir, 1, -1)
+            x = (x_fun, x_dir)
+        else:
+            fmap.append(x)
+            x = torch.flatten(x, 1, -1)
 
         return x, fmap
 
@@ -204,6 +233,7 @@ class MultiSpecDiscriminator(torch.nn.Module):
         self,
         y: torch.Tensor,
         y_hat: torch.Tensor,
+        flg_train: bool = False,
     ) -> tuple[
         list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]
     ]:
@@ -212,10 +242,14 @@ class MultiSpecDiscriminator(torch.nn.Module):
         fmap_rs = []
         fmap_gs = []
         for i, d in enumerate(self.discriminators):
-            y_d_r, fmap_r = d(y)
-            y_d_g, fmap_g = d(y_hat)
-            y_d_rs.append(y_d_r - y_d_g)
-            y_d_gs.append(y_d_g - y_d_r)
+            y_d_r, fmap_r = d(y, flg_train=flg_train)
+            y_d_g, fmap_g = d(y_hat, flg_train=flg_train)
+            if flg_train:
+                y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
+                y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
+            else:
+                y_d_rs.append(y_d_r - y_d_g)
+                y_d_gs.append(y_d_g - y_d_r)
             fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
             fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
 

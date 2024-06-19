@@ -231,7 +231,8 @@ def feature_loss(fmap_r, fmap_g):
     
     for dr, dg in zip(fmap_r, fmap_g):
         for rl, gl in zip(dr, dg):
-            rl = rl.float().detach()
+            # rl = rl.float().detach()
+            rl = rl.float()
             gl = gl.float()
             loss += F.huber_loss(gl, rl)
 
@@ -244,10 +245,14 @@ def discriminator_loss(disc_real_outputs, disc_generated_outputs):
     g_losses = []
     
     for dr, dg in zip(disc_real_outputs, disc_generated_outputs):
-        dr = dr.float()
-        dg = dg.float()
-        r_loss = torch.mean(F.relu(1 - dr)) + torch.mean(F.relu(1 + dg))
-        g_loss = -torch.mean(dg)
+        dr_fun, dr_dir = dr[0].float(), dr[1].float()
+        dg_fun, dg_dir = dg[0].float(), dg[1].float()
+        r_loss_fun = torch.mean(F.relu(1 - dr_fun)) + torch.mean(F.relu(1 + dg_fun))
+        g_loss_fun = -torch.mean(dg_fun)
+        r_loss_dir = torch.mean(F.relu(1 - dr_dir)) + torch.mean(F.relu(1 + dg_dir))
+        g_loss_dir = -torch.mean(dg_dir)
+        r_loss = r_loss_fun + r_loss_dir
+        g_loss = g_loss_fun + g_loss_dir
         loss += r_loss + g_loss
         r_losses.append(r_loss.item())
         g_losses.append(g_loss.item())

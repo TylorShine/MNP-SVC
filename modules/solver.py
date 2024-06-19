@@ -355,7 +355,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                
             if model_d is not None:
                 with autocast(device_type=args.device, dtype=dtype):
-                    d_signal_real, d_signal_gen, _, _ = model_d(audio.unsqueeze(1), signal.detach().unsqueeze(1))
+                    d_signal_real, d_signal_gen, _, _ = model_d(audio.unsqueeze(1), signal.detach().unsqueeze(1), flg_train=True)
                     
                 # discriminator loss
                 loss_d, losses_d_real, losses_d_gen = discriminator_loss(d_signal_real, d_signal_gen)
