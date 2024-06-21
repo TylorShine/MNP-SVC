@@ -305,7 +305,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     train_params = []
             
     if args.train.ft_spk_embed:
-        train_params += ['unit2ctrl.spk_embed.', 'unit2ctrl.recon_spk_embed.']
+        # train_params += ['unit2ctrl.spk_embed.', 'unit2ctrl.recon_spk_embed.']
+        train_params += ['unit2ctrl.spk_embed.']
                 
     if args.train.ft_spk_embed_conv:
         train_params += ['unit2ctrl.spk_embed_conv.']
