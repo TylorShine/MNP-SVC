@@ -20,10 +20,10 @@ class SSSLoss(nn.Module):
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
-        true_spec = self.spec(x_true_pad)[:, :, 1:-1]
-        pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
+        true_spec = self.spec(x_true_pad)
+        pred_spec = self.spec(x_pred_pad)
         S_true = true_spec + self.eps
         S_pred = pred_spec + self.eps
         # S_true = self.spec(x_true) + self.eps
@@ -104,10 +104,10 @@ class LF4SLoss(nn.Module):
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
-        true_spec = self.spec(x_true_pad)[:, :, 1:-1]
-        pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
+        true_spec = self.spec(x_true_pad)
+        pred_spec = self.spec(x_pred_pad)
         S_true = true_spec * self.log_freq_scale + self.eps
         S_pred = pred_spec * self.log_freq_scale + self.eps
         
@@ -146,8 +146,8 @@ class LF4SMPLoss(nn.Module):
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
         true_spec = self.spec(x_true_pad)
         pred_spec = self.spec(x_pred_pad)
         S_true = true_spec.abs() * self.log_freq_scale + self.eps

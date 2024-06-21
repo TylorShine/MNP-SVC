@@ -41,7 +41,7 @@ def test(args, model, loss_func, loader_test, saver):
 
                 # forward
                 st_time = time.time()
-                signal, _ = model(units, data['f0'], data['volume'], data[spk_id_key])
+                signal = model(units, data['f0'], data['volume'], data[spk_id_key])
                 ed_time = time.time()
 
                 # crop
@@ -302,14 +302,20 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
         for param_name, param in model.named_parameters():
             param.requires_grad = False
             
+    train_params = []
+            
     if args.train.ft_spk_embed:
-        for param_name, param in model.named_parameters():
-            if not param_name.startswith('unit2ctrl.spk_embed.'):
-                param.requires_grad = False
+        train_params += ['unit2ctrl.spk_embed.', 'unit2ctrl.recon_spk_embed.']
+                
+    if args.train.ft_spk_embed_conv:
+        train_params += ['unit2ctrl.spk_embed_conv.']
                 
     if args.train.ft_dense_out:
+        train_params += ['unit2ctrl.dense_out.']
+        
+    if len(train_params) > 0:
         for param_name, param in model.named_parameters():
-            if not param_name.startswith('unit2ctrl.dense_out.'):
+            if not any([param_name.startswith(p) for p in train_params]):
                 param.requires_grad = False
     
     # model size
@@ -341,12 +347,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
 
             # forward
             if dtype == torch.float32:
-                signal, _ = model(units.float(), f0, volume, data[spk_id_key],
+                signal = model(units.float(), f0, volume, data[spk_id_key],
                                               infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
             else:
                 with autocast(device_type=args.device, dtype=dtype):
-                    signal, _ = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    signal = model(units.to(dtype), f0, volume, data[spk_id_key],
                                                   infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
 
