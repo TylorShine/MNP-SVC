@@ -15,8 +15,8 @@ class GRN(nn.Module):
         self.eps = eps
 
     def forward(self, x):
-        Gx = torch.norm(x, p=2, dim=-1, keepdim=True)
-        Nx = Gx / (Gx.mean(dim=1, keepdim=True) + self.eps)
+        Gx = torch.norm(x, p=2, dim=1, keepdim=True)
+        Nx = Gx / (Gx.mean(dim=-1, keepdim=True) + self.eps)
         return self.gamma * (x * Nx) + self.beta + x
     
 class LayerNorm1d(nn.Module):
@@ -51,9 +51,10 @@ class ConvNeXtV2LikeBlock(nn.Module):
             nn.Conv1d(dim, dim, kernel_size, 1, padding,
                             dilation=dilation, groups=dim),
             Transpose((2, 1)),
-            LayerNorm1d(dim),
+            nn.LayerNorm(dim, eps=1e-6),
             nn.Linear(dim, dim * bottoleneck_dilation),
-            nn.GELU(),
+            # nn.GELU(),
+            nn.CELU(),
             GRN(dim * bottoleneck_dilation),
             nn.Linear(dim * bottoleneck_dilation, dim),
             Transpose((2, 1))
@@ -69,6 +70,47 @@ class ConvNeXtV2LikeEncoder(nn.Module):
         self.model = nn.Sequential(
             Transpose((2, 1)),
             *[ConvNeXtV2LikeBlock(dim_model, kernel_size, dilation, bottoleneck_dilation) for _ in range(num_layers)],
+            Transpose((2, 1)))
+
+    def forward(self, x):
+        return self.model(x)
+    
+    
+class ConvNeXtV2GLULikeBlock(nn.Module):
+    def __init__(self, dim, kernel_size=5, dilation=1, bottoleneck_dilation=4):
+        super().__init__()
+        padding = (kernel_size - 1) * dilation // 2
+        self.model_1 = nn.Sequential(
+            nn.Conv1d(dim, dim, kernel_size, 1, padding,
+                            dilation=dilation, groups=dim),
+            Transpose((2, 1)),
+            nn.LayerNorm(dim, eps=1e-6),
+        )
+        self.model_2_1 = nn.Sequential(
+            nn.Linear(dim, dim * bottoleneck_dilation),
+            # nn.GELU(),
+            nn.CELU(),
+        )
+        self.model_2_2 = nn.Sequential(
+            nn.Linear(dim, dim * bottoleneck_dilation),
+        )
+        self.model_3 = nn.Sequential(
+            GRN(dim * bottoleneck_dilation),
+            nn.Linear(dim * bottoleneck_dilation, dim),
+            Transpose((2, 1)),
+        )
+
+    def forward(self, x):
+        x1 = self.model_1(x)
+        return x + self.model_3(self.model_2_1(x1) * self.model_2_2(x1))
+    
+    
+class ConvNeXtV2GLULikeEncoder(nn.Module):
+    def __init__(self, num_layers, dim_model, kernel_size=5, dilation=1, bottoleneck_dilation=4):
+        super().__init__()
+        self.model = nn.Sequential(
+            Transpose((2, 1)),
+            *[ConvNeXtV2GLULikeBlock(dim_model, kernel_size, dilation, bottoleneck_dilation) for _ in range(num_layers)],
             Transpose((2, 1)))
 
     def forward(self, x):

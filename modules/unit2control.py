@@ -2,7 +2,7 @@ import torch
 import torch.nn as nn
 from torch.nn.utils.parametrizations import weight_norm
 
-from .convnext_v2_like import GRN, LayerNorm1d, ConvNeXtV2LikeEncoder
+from .convnext_v2_like import GRN, ConvNeXtV2LikeEncoder, ConvNeXtV2GLULikeEncoder
 
 
 def split_to_dict(tensor, tensor_splits):
@@ -69,6 +69,7 @@ class Unit2ControlGE2E(nn.Module):
         self.n_hidden_channels = n_hidden_channels
         self.spk_embed_channels = spk_embed_channels
         self.use_spk_embed = use_spk_embed
+        self.conv_stack_middle_size = conv_stack_middle_size
         if use_spk_embed:
             # TODO: experiment with what happens if we don't use embed convs
             if use_embed_conv:
@@ -76,28 +77,32 @@ class Unit2ControlGE2E(nn.Module):
                     nn.Conv1d(n_hidden_channels, embed_conv_channels, 3, 1, 1, bias=False),
                     nn.Sequential(
                         Transpose((2, 1)),
-                        LayerNorm1d(embed_conv_channels, eps=1e-6),
-                        nn.GELU(),
+                        nn.LayerNorm(embed_conv_channels, eps=1e-6),
+                        # nn.GELU(),
+                        nn.CELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
                 nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
                 nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
                 nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Linear(spk_embed_channels, n_hidden_channels)
+            self.recon_spk_embed = nn.Linear(spk_embed_channels, conv_stack_middle_size)
         else:
             if use_embed_conv:
                 self.spk_embed_conv = nn.Sequential(
                     nn.Conv1d(n_hidden_channels, embed_conv_channels, 3, 1, 1, bias=False),
                     nn.Sequential(
                         Transpose((2, 1)),
-                        LayerNorm1d(embed_conv_channels, eps=1e-6),
-                        nn.GELU(),
+                        nn.LayerNorm(embed_conv_channels, eps=1e-6),
+                        # nn.GELU(),
+                        nn.CELU(),
                         GRN(embed_conv_channels)),
                     nn.Linear(embed_conv_channels, n_hidden_channels))
                 nn.init.kaiming_normal_(self.spk_embed_conv[0].weight)
                 nn.init.normal_(self.spk_embed_conv[-1].weight, 0, 0.01)
                 nn.init.constant_(self.spk_embed_conv[-1].bias, 0)
             self.spk_embed = nn.Embedding(n_spk, n_hidden_channels)
+            self.recon_spk_embed = nn.Embedding(n_spk, conv_stack_middle_size)
         if use_pitch_aug:
             self.aug_shift_embed = nn.Linear(1, n_hidden_channels, bias=False)
         else:
@@ -108,15 +113,27 @@ class Unit2ControlGE2E(nn.Module):
                 nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
                 nn.Sequential(
                     Transpose((2, 1)),
-                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
-                    nn.GELU(),
-                    GRN(conv_stack_middle_size)),
-                nn.Linear(conv_stack_middle_size, n_hidden_channels),)
-        nn.init.normal_(self.stack[-1].weight, 0, 0.01)
-        nn.init.constant_(self.stack[-1].bias, 0)
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
+                    GRN(conv_stack_middle_size)),)
+                # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+        # nn.init.normal_(self.stack[-1].weight, 0, 0.01)
+        # nn.init.constant_(self.stack[-1].bias, 0)
+        
+        # feature reconstructor
+        self.recon = nn.Sequential(
+            ConvNeXtV2GLULikeEncoder(
+                # num_layers=3,
+                num_layers=2,
+                dim_model=conv_stack_middle_size,
+                kernel_size=7,
+                bottoleneck_dilation=2),
+            nn.Linear(conv_stack_middle_size, n_hidden_channels))
+        nn.init.normal_(self.recon[-1].weight, 0, 0.01)
+        nn.init.constant_(self.recon[-1].bias, 0)
 
         # transformer
-        self.decoder = ConvNeXtV2LikeEncoder(
+        self.decoder = ConvNeXtV2GLULikeEncoder(
             num_layers=3,
             dim_model=n_hidden_channels,
             kernel_size=31,
@@ -149,6 +166,7 @@ class Unit2ControlGE2E(nn.Module):
         if not self.use_embed_conv:
             x = x + f0_emb + phase_emb
                     
+        recon_spk_emb = None
         if spk_mix is not None:
             if self.use_embed_conv:
                 if self.use_spk_embed:
@@ -156,21 +174,37 @@ class Unit2ControlGE2E(nn.Module):
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed_conv(
                             self.spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
-                            f0_emb.transpose(2, 1) + 
+                            f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 else:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed_conv(
                             self.spk_embed(spk_id[i]).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
-                            f0_emb.transpose(2, 1) + 
+                            f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
             else:
                 if self.use_spk_embed:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 else:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed(spk_id[i]).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
         else:
             if self.use_embed_conv:
                 if self.use_spk_embed:
@@ -188,8 +222,12 @@ class Unit2ControlGE2E(nn.Module):
                     x = x + self.spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
                 else:
                     x = x + self.spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                    
+            recon_spk_emb = self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 
-        x = x + self.stack(units.transpose(2, 1))
+        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
+        recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
+        x = x + self.recon[-1](recon)
         
         x = self.decoder(x)
         x = self.norm(x)
@@ -197,7 +235,7 @@ class Unit2ControlGE2E(nn.Module):
         
         controls = split_to_dict(e, self.output_splits)
         
-        return controls, x
+        return controls, recon
     
     
 class Unit2ControlGE2E_export(Unit2ControlGE2E):
@@ -288,11 +326,54 @@ class Unit2ControlStackOnly(nn.Module):
                 nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
                 nn.Sequential(
                     Transpose((2, 1)),
-                    LayerNorm1d(conv_stack_middle_size, eps=1e-6),
-                    nn.GELU(),
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
                     GRN(conv_stack_middle_size)))
                 # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
         nn.init.kaiming_normal_(self.stack[0].weight)
         
     def forward(self, units):
         return self.stack(units.transpose(2, 1))
+    
+    
+class Unit2ControlStackAndFeatureRecon(nn.Module):
+    def __init__(
+        self,
+        input_channel,
+        spk_embed_channels,
+        n_hidden_channels=256,
+        n_spk=1024,
+        conv_stack_middle_size=32,
+        use_spk_embed=True,
+        ):
+        super().__init__()
+        
+        self.n_hidden_channels = n_hidden_channels
+        
+        if use_spk_embed:
+            self.recon_spk_embed = nn.Linear(spk_embed_channels, conv_stack_middle_size)
+        else:
+            self.recon_spk_embed = nn.Embedding(n_spk, conv_stack_middle_size)
+        
+        self.stack = nn.Sequential(
+                nn.Conv1d(input_channel, conv_stack_middle_size, 3, 1, 1),
+                nn.Sequential(
+                    Transpose((2, 1)),
+                    nn.LayerNorm(conv_stack_middle_size, eps=1e-6),
+                    nn.CELU(),
+                    GRN(conv_stack_middle_size)))
+                # nn.Linear(conv_stack_middle_size, n_hidden_channels),)
+        self.recon = nn.Sequential(
+            ConvNeXtV2GLULikeEncoder(
+                num_layers=1,
+                dim_model=conv_stack_middle_size,
+                kernel_size=7,
+                bottoleneck_dilation=2),
+            nn.Linear(conv_stack_middle_size, n_hidden_channels))
+                
+        nn.init.kaiming_normal_(self.stack[0].weight)
+        
+    def forward(self, units, spk_id):
+        return self.recon(
+            self.stack(units.transpose(2, 1))
+            + self.recon_spk_embed(spk_id))

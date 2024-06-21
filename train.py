@@ -8,7 +8,11 @@ from modules.common import load_config, load_model
 from modules.dataset.loader import get_data_loaders
 from modules.solver import train
 from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly
-from modules.loss import RSSLoss, DSSLoss, DLFSSLoss
+from modules.discriminator import MultiSpecDiscriminator
+from modules.loss import RSSLoss, DSSLoss, DLFSSLoss, DLFSSMPLoss
+
+
+torch.backends.cudnn.benchmark = True
 
 
 def parse_args(args=None, namespace=None):
@@ -57,17 +61,22 @@ if __name__ == '__main__':
                 harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
                 use_harmonic_env=args.model.use_harmonic_env,
                 use_noise_env=args.model.use_noise_env,
+                use_add_noise_env=args.model.use_add_noise_env,
                 noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+                add_noise=args.model.add_noise,
+                use_phase_offset=args.model.use_phase_offset,
                 use_f0_offset=args.model.use_f0_offset,
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
+            if args.model.use_discriminator:
+                model_d = MultiSpecDiscriminator()
             
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
     
     
-    # load parameters
+    # load model parameters
     optimizer = torch.optim.AdamW(model.parameters())
     initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
     
@@ -78,19 +87,25 @@ if __name__ == '__main__':
         param_group['lr'] = lr
         param_group['weight_decay'] = args.train.weight_decay
         
-    scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
-                                                           threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
-                                                           cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-    
-    if states is not None:
-        sched_states = states.get('scheduler')
-        if sched_states is not None:
-            scheduler.best = sched_states['best']
-            scheduler.cooldown_counter = sched_states['cooldown_counter']
-            scheduler.num_bad_epochs = sched_states['num_bad_epochs']
-            scheduler._last_lr = sched_states['_last_lr']
+    if args.train.only_u2c_stack:
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+    elif not args.model.use_discriminator:
+        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+                                                            threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+                                                            cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+        if states is not None:
+            sched_states = states.get('scheduler')
+            if sched_states is not None:
+                scheduler.best = sched_states['best']
+                scheduler.cooldown_counter = sched_states['cooldown_counter']
+                scheduler.num_bad_epochs = sched_states['num_bad_epochs']
+                scheduler._last_lr = sched_states['_last_lr']
+        else:
+            scheduler._last_lr = (lr,)
     else:
-        scheduler._last_lr = (lr,)
+        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
+    
         
         
     # loss
@@ -100,14 +115,50 @@ if __name__ == '__main__':
     elif args.loss.use_dual_scale_log_freq:
         loss_func = DLFSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_magphase:
+        loss_func = DLFSSMPLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
     else:
         loss_func = RSSLoss(args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, device=args.device)
+        
+        
+    if args.model.use_discriminator:
+        # load discriminator model parameters
+        optimizer_d = torch.optim.AdamW(model_d.parameters())
+        _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
+        lr = args.train.lr*2. if states is None else states['last_lr'][0]
+        
+        for param_group in optimizer_d.param_groups:
+            param_group['initial_lr'] = args.train.lr
+            param_group['lr'] = lr
+            param_group['weight_decay'] = args.train.weight_decay
+            
+        # scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+        #                                                          threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+        #                                                          cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*2.)
+    
+        if states is not None:
+            sched_states = states.get('scheduler')
+            if sched_states is not None:
+                # scheduler_d.best = sched_states['best']
+                # scheduler_d.cooldown_counter = sched_states['cooldown_counter']
+                # scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
+                scheduler_d._last_lr = sched_states['_last_lr']
+        else:
+            scheduler_d._last_lr = (lr,)
+    else:
+        model_d, optimizer_d, scheduler_d = None, None, None
+        
+    
 
 
     # device
     if args.device == 'cuda':
         torch.cuda.set_device(args.env.gpu_id)
     model.to(args.device)
+    if model_d is not None:
+        model_d.to(args.device)
     
     for state in optimizer.state.values():
         for k, v in state.items():
@@ -122,10 +173,10 @@ if __name__ == '__main__':
     
     
     # copy spk_info
-    if args.model.use_speaker_embed:
+    if args.model.use_speaker_embed and not args.train.only_u2c_stack:
         shutil.copy2(os.path.join(args.data.dataset_path, 'spk_info.npz'), os.path.join(args.env.expdir, 'spk_info.npz'))
     
     
     # run
-    train(args, initial_global_step, model, optimizer, scheduler, loss_func, loaders['train'], loaders['test'])
+    train(args, initial_global_step, (model, optimizer, scheduler, loss_func), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
     

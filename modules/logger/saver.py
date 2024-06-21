@@ -18,13 +18,15 @@ class Saver(object):
     def __init__(
             self, 
             args,
-            initial_global_step=-1):
+            initial_global_step=-1,
+            initial_global_epoch=-1):
 
         self.expdir = args.env.expdir
         self.sample_rate = args.data.sampling_rate
         
         # cold start
         self.global_step = initial_global_step
+        self.global_epoch = initial_global_epoch
         self.init_time = time.time()
         self.last_time = time.time()
 
@@ -55,9 +57,9 @@ class Saver(object):
                     msg_list.append(f'{k}:')
                     for kk, vv in v.items():
                         if isinstance(v, int):
-                            msg_list.append(f'{kk}: {vv:,}')
+                            msg_list.append(f' {kk}: {vv:,}')
                         else:
-                            msg_list.append(f'{kk}: {vv}')
+                            msg_list.append(f' {kk}: {vv}')
                 else:
                     if isinstance(v, int):
                         msg_list.append(f'{k}: {v:,}')
@@ -113,12 +115,12 @@ class Saver(object):
             model, 
             optimizer,
             name='model',
-            postfix='',
+            postfix='_',
             as_json=False,
             states=None):
         # path
-        if postfix:
-            postfix = '_' + postfix
+        if postfix != '_':
+            postfix = postfix
         path_pt = os.path.join(
             self.expdir , name+postfix+'.pt')
        
@@ -128,6 +130,7 @@ class Saver(object):
         # save
         save_model = {
             'global_step': self.global_step,
+            'global_epoch': self.global_epoch,
             'model': model.state_dict(),
             
         }
@@ -143,10 +146,10 @@ class Saver(object):
                 self.expdir , name+'.json')
             to_json(path_pt, path_json)
     
-    def delete_model(self, name='model', postfix=''):
+    def delete_model(self, name='model', postfix='_'):
         # path
-        if postfix:
-            postfix = '_' + postfix
+        if postfix != '_':
+            postfix = postfix
         path_pt = os.path.join(
             self.expdir , name+postfix+'.pt')
        
@@ -157,5 +160,8 @@ class Saver(object):
         
     def global_step_increment(self):
         self.global_step += 1
+        
+    def global_epoch_increment(self):
+        self.global_epoch += 1
 
 
