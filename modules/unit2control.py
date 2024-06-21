@@ -166,6 +166,7 @@ class Unit2ControlGE2E(nn.Module):
         if not self.use_embed_conv:
             x = x + f0_emb + phase_emb
                     
+        recon_spk_emb = None
         if spk_mix is not None:
             if self.use_embed_conv:
                 if self.use_spk_embed:
@@ -175,19 +176,35 @@ class Unit2ControlGE2E(nn.Module):
                             self.spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
                             f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 else:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed_conv(
                             self.spk_embed(spk_id[i]).expand(x.shape[0], x.shape[1], self.n_hidden_channels).transpose(2, 1) +
                             f0_emb.transpose(2, 1) +
                             phase_emb.transpose(2, 1))
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
             else:
                 if self.use_spk_embed:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 else:
                     for i in range(spk_id.shape[0]):
                         x = x + spk_mix[i] * self.spk_embed(spk_id[i]).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                        if recon_spk_emb is None:
+                            recon_spk_emb = spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
+                        else:
+                            recon_spk_emb += spk_mix[i] * self.recon_spk_embed(spk_id[i]).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
         else:
             if self.use_embed_conv:
                 if self.use_spk_embed:
@@ -205,8 +222,11 @@ class Unit2ControlGE2E(nn.Module):
                     x = x + self.spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
                 else:
                     x = x + self.spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.n_hidden_channels)
+                    
+            recon_spk_emb = self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 
-        recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
+        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
+        recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
         x = x + self.recon[-1](recon)
         
         x = self.decoder(x)

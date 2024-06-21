@@ -528,4 +528,4 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             window = self.window,
             center = True)
         
-        return signal, hidden
+        return signal
