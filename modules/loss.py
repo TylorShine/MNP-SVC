@@ -16,14 +16,14 @@ class SSSLoss(nn.Module):
         self.hop_length = int(n_fft * (1 - overlap))  # 25% of the length
         self.spec = torchaudio.transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=1,
-            normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs)
+            normalized=True, center=True, window_fn=window_fn, wkwargs=wkwargs)
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
-        true_spec = self.spec(x_true_pad)
-        pred_spec = self.spec(x_pred_pad)
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
+        true_spec = self.spec(x_true_pad)[:, :, 1:-1]
+        pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
         S_true = true_spec + self.eps
         S_pred = pred_spec + self.eps
         # S_true = self.spec(x_true) + self.eps
@@ -99,15 +99,15 @@ class LF4SLoss(nn.Module):
         self.hop_length = int(n_fft * (1 - overlap))
         self.spec = torchaudio.transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=1,
-            normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs)
+            normalized=True, center=True, window_fn=window_fn, wkwargs=wkwargs)
         self.log_freq_scale = self.log_frequency_scale(n_fft)[None, :, None]
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
-        true_spec = self.spec(x_true_pad)
-        pred_spec = self.spec(x_pred_pad)
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
+        true_spec = self.spec(x_true_pad)[:, :, 1:-1]
+        pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
         S_true = true_spec * self.log_freq_scale + self.eps
         S_pred = pred_spec * self.log_freq_scale + self.eps
         
@@ -139,17 +139,20 @@ class LF4SMPLoss(nn.Module):
         self.beta = beta
         self.eps = eps
         self.hop_length = int(n_fft * (1 - overlap))
+        # self.spec = torchaudio.transforms.Spectrogram(
+        #     n_fft=self.n_fft, hop_length=self.hop_length, power=None,
+        #     normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs)
         self.spec = torchaudio.transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=None,
-            normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs)
+            normalized=True, center=True, window_fn=window_fn, wkwargs=wkwargs)
         self.log_freq_scale = self.log_frequency_scale(n_fft)[None, :, None]
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
-        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'reflect')
-        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'reflect')
-        true_spec = self.spec(x_true_pad)
-        pred_spec = self.spec(x_pred_pad)
+        x_true_pad = F.pad(x_true, (pad_edges, pad_edges), mode = 'constant')
+        x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
+        true_spec = self.spec(x_true_pad)[:, :, 1:-1]
+        pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
         S_true = true_spec.abs() * self.log_freq_scale + self.eps
         S_pred = pred_spec.abs() * self.log_freq_scale + self.eps
         angle_true = true_spec.angle() * self.log_freq_scale
