@@ -1,4 +1,4 @@
-import PySimpleGUI as sg
+import FreeSimpleGUI as sg
 import torch, librosa, threading, pickle
 import numpy as np
 from torch.nn import functional as F

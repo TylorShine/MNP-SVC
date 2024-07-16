@@ -45,6 +45,13 @@ if __name__ == '__main__':
     # make metadatas
     make_metadata(args.data.dataset_path, args.data.extensions)
     
+    mel_vocoder_args = {}
+    
+    if "Diffusion" in args.model.type:
+        mel_vocoder_args.update({
+            'mel_vocoder_type': args.model.vocoder.type,
+            'mel_vocoder_ckpt': args.model.vocoder.ckpt,
+        })
     
     # preprocessor parameters
     params = PreprocessorParameters(
@@ -66,6 +73,8 @@ if __name__ == '__main__':
         units_encoder_hop_size=args.data.encoder_hop_size,
         units_encoder_extract_layers=args.model.units_layers,
         volume_extractor_window_size=args.data.volume_window_size,
+        use_mel="Diffusion" in args.model.type,
+        **mel_vocoder_args,
         device=device)
     
     # get dataset

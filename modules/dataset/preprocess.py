@@ -5,7 +5,7 @@ import numpy as np
 import librosa
 from tqdm import tqdm
 
-from modules.extractors import F0Extractor, SpeakerEmbedEncoder, UnitsEncoder, VolumeExtractor
+from modules.extractors import F0Extractor, SpeakerEmbedEncoder, UnitsEncoder, VolumeExtractor, MelExtractor
 
 
 class PreprocessorParameters:
@@ -30,6 +30,9 @@ class PreprocessorParameters:
                  units_encoder_extract_layers: list[list[int]] = 0,
                  units_encoder_no_alignment: bool = False,
                  volume_extractor_window_size: int = 8,
+                 use_mel: bool = False,
+                 mel_vocoder_type: str = 'nsf-hifigan',
+                 mel_vocoder_ckpt: str = 'models/pretrained/nsf-hifigan/model',
                  device: str | torch.device = 'cpu',
                  ):
         
@@ -59,6 +62,7 @@ class PreprocessorParameters:
         
         self.f0_extractor = None
         self.speaker_embed_encoder = None
+        self.mel_extractor = None
         
         if use_f0:
             self.f0_extractor = {
@@ -74,6 +78,13 @@ class PreprocessorParameters:
                 'encoder': speaker_embed_encoder,
                 'encoder_ckpt': speaker_embed_encoder_path,
                 'encoder_sample_rate': speaker_embed_encoder_sample_rate,
+                'device': device,
+            }
+            
+        if use_mel:
+            self.mel_extractor = {
+                'vocoder_type': mel_vocoder_type,
+                'vocoder_ckpt': mel_vocoder_ckpt,
                 'device': device,
             }
             
@@ -122,6 +133,20 @@ def preprocess_main(root_path: str, dataset: dict[str, dict[str, str]], params: 
             np.savez_compressed(f'{f0_path}.npz', f0=f0)
         del f0_extractor
         f0_extractor = None
+        
+    # mel
+    if params.mel_extractor is not None:
+        mel_extractor = MelExtractor(**params.mel_extractor)
+        mel_dir = os.path.join(params.common['data_dir'], 'mel')
+        for path in tqdm(dataset.keys(), desc='Extract mel'):
+            audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+            mel = mel_extractor.extract(torch.from_numpy(audio).float().to(mel_extractor.device).unsqueeze(0), sample_rate=sr)
+            mel = mel.squeeze().cpu().numpy()
+            mel_path = os.path.join(mel_dir, os.path.relpath(path, start='data'))
+            os.makedirs(os.path.dirname(mel_path), exist_ok=True)
+            np.savez_compressed(f'{mel_path}.npz', mel=mel)
+        del mel_extractor
+        mel_extractor = None
 
 
 def preprocess_spkinfo(root_path: str, dataset: dict[str, dict[str, str]], split: str = "", params: PreprocessorParameters = PREPROCESSOR_PARAMS):

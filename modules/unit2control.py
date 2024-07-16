@@ -235,7 +235,7 @@ class Unit2ControlGE2E(nn.Module):
         
         controls = split_to_dict(e, self.output_splits)
         
-        return controls, recon
+        return controls, x
     
     
 class Unit2ControlGE2E_export(Unit2ControlGE2E):

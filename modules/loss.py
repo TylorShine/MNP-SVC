@@ -118,8 +118,13 @@ class LF4SLoss(nn.Module):
         loss = converge_term + self.alpha * log_term
         return loss
     
-    def log_frequency_scale(self, n_fft):
-        return torch.log2(torch.arange(0, n_fft//2+1) + 2) / torch.log2(torch.tensor(n_fft))
+    # def log_frequency_scale(self, n_fft):
+    #     return torch.log2(torch.arange(0, n_fft//2+1) + 2) / torch.log2(torch.tensor(n_fft))
+    
+    def log_frequency_scale(self, n_fft, min_clip_bins=16):
+        ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft))
+        ret[0] = 1.
+        return ret
     
     def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
         super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
@@ -144,7 +149,7 @@ class LF4SMPLoss(nn.Module):
         #     normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs)
         self.spec = torchaudio.transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=None,
-            normalized=True, center=True, window_fn=window_fn, wkwargs=wkwargs)
+            normalized=True, center=False, window_fn=window_fn, wkwargs=wkwargs, pad_mode="constant")
         self.log_freq_scale = self.log_frequency_scale(n_fft)[None, :, None]
         
     def forward(self, x_true, x_pred):
@@ -153,10 +158,14 @@ class LF4SMPLoss(nn.Module):
         x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
         true_spec = self.spec(x_true_pad)[:, :, 1:-1]
         pred_spec = self.spec(x_pred_pad)[:, :, 1:-1]
+        # true_spec = self.spec(x_true)[:, :, 1:-1]
+        # pred_spec = self.spec(x_pred)[:, :, 1:-1]
         S_true = true_spec.abs() * self.log_freq_scale + self.eps
         S_pred = pred_spec.abs() * self.log_freq_scale + self.eps
-        angle_true = true_spec.angle() * self.log_freq_scale
-        angle_pred = pred_spec.angle() * self.log_freq_scale 
+        # angle_true = true_spec.angle() * self.log_freq_scale
+        # angle_pred = pred_spec.angle() * self.log_freq_scale 
+        angle_true = true_spec.angle()
+        angle_pred = pred_spec.angle()
         
         
         converge_term = torch.mean(torch.linalg.norm(S_true - S_pred, dim = (1, 2)) / torch.linalg.norm(S_true + S_pred, dim = (1, 2)))
@@ -168,8 +177,13 @@ class LF4SMPLoss(nn.Module):
         loss = converge_term + self.alpha * log_term + self.beta * angle_term
         return loss
     
-    def log_frequency_scale(self, n_fft):
-        return torch.log2(torch.arange(0, n_fft//2+1) + 2) / torch.log2(torch.tensor(n_fft))
+    # def log_frequency_scale(self, n_fft):
+    #     return torch.log2(torch.arange(0, n_fft//2+1) + 2) / torch.log2(torch.tensor(n_fft))
+    
+    def log_frequency_scale(self, n_fft, min_clip_bins=16):
+        ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft))
+        ret[0] = 1.
+        return ret
     
     def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
         super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
@@ -239,7 +253,7 @@ def feature_loss(fmap_r, fmap_g):
             gl = gl.float()
             loss += F.huber_loss(gl, rl)
 
-    return loss * 2.
+    return loss/len(fmap_r) * 2.
 
 
 def discriminator_loss(disc_real_outputs, disc_generated_outputs):

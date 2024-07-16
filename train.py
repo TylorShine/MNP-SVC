@@ -7,8 +7,10 @@ import shutil
 from modules.common import load_config, load_model
 from modules.dataset.loader import get_data_loaders
 from modules.solver import train
-from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly
-from modules.discriminator import MultiSpecDiscriminator
+from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly, NMPSFHiFi
+from modules.diffusion.vocoder import Unit2WavMinimumNoisedPhase
+from modules.reflow.vocoder import Unit2WavMinimumNoisedPhase as Unit2WavMinimumNoisedPhaseReflow, Unit2WavMinimumNoisedPhaseDirect, Unit2WavMinimumNoisedPhaseHidden
+from modules.discriminator import MultiSpecDiscriminator, MultiPeriodSignalDiscriminator
 from modules.loss import RSSLoss, DSSLoss, DLFSSLoss, DLFSSMPLoss
 
 
@@ -35,6 +37,8 @@ if __name__ == '__main__':
     args = load_config(cmd.config)
     print(' > config:', cmd.config)
     print(' >    exp:', args.env.expdir)
+    
+    vocoder = None
 
     # load model
     model = None
@@ -66,19 +70,286 @@ if __name__ == '__main__':
                 add_noise=args.model.add_noise,
                 use_phase_offset=args.model.use_phase_offset,
                 use_f0_offset=args.model.use_f0_offset,
+                use_short_filter=args.model.use_short_filter,
+                use_noise_short_filter=args.model.use_noise_short_filter,
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
             if args.model.use_discriminator:
                 model_d = MultiSpecDiscriminator()
+                # model_d = MultiPeriodSignalDiscriminator()
+    elif args.model.type == 'DiffusionMinimumNoisedPhase':
+        from modules.diffusion.vocoder import Vocoder
+        # load vocoder
+        vocoder = Vocoder(args.model.vocoder.type, args.model.vocoder.ckpt, device=args.device)
+        # if args.train.only_u2c_stack:
+        #     model = CombSubMinimumNoisedPhaseStackOnly(
+        #         n_unit=args.data.encoder_out_channels,
+        #         n_hidden_channels=args.model.units_hidden_channels
+        #     )
+        # else:
+        model = Unit2WavMinimumNoisedPhase(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_phase_offset=args.model.use_phase_offset,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            out_dims=vocoder.dimension,
+            n_layers=args.model.n_layers,
+            n_chans=args.model.n_chans,
+            )
+        model.ddsp_model.unit2ctrl.compile(mode="reduce-overhead")
+        model.diff_model.denoise_fn.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
+            # model_d = MultiPeriodSignalDiscriminator()
+            
+    elif args.model.type == 'ReflowMinimumNoisedPhase':
+        from modules.reflow.vocoder import Vocoder
+        # load vocoder
+        vocoder = Vocoder(args.model.vocoder.type, args.model.vocoder.ckpt, device=args.device)
+        # if args.train.only_u2c_stack:
+        #     model = CombSubMinimumNoisedPhaseStackOnly(
+        #         n_unit=args.data.encoder_out_channels,
+        #         n_hidden_channels=args.model.units_hidden_channels
+        #     )
+        # else:
+        model = Unit2WavMinimumNoisedPhaseReflow(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_phase_offset=args.model.use_phase_offset,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            out_dims=vocoder.dimension,
+            n_layers=args.model.n_layers,
+            n_chans=args.model.n_chans,
+            )
+        model.ddsp_model.unit2ctrl.compile(mode="reduce-overhead")
+        model.reflow_model.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
+            # model_d = MultiPeriodSignalDiscriminator()
+            
+    elif args.model.type == 'ReflowDirectMinimumNoisedPhase':
+        from modules.reflow.vocoder import Vocoder
+        # load vocoder
+        vocoder = Vocoder(args.model.vocoder.type, args.model.vocoder.ckpt, device=args.device)
+        # if args.train.only_u2c_stack:
+        #     model = CombSubMinimumNoisedPhaseStackOnly(
+        #         n_unit=args.data.encoder_out_channels,
+        #         n_hidden_channels=args.model.units_hidden_channels
+        #     )
+        # else:
+        model = Unit2WavMinimumNoisedPhaseDirect(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_phase_offset=args.model.use_phase_offset,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            out_dims=vocoder.dimension,
+            n_layers=args.model.n_layers,
+            n_chans=args.model.n_chans,
+            )
+        model.ddsp_model.unit2ctrl.compile(mode="reduce-overhead")
+        model.reflow_model.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
+            # model_d = MultiPeriodSignalDiscriminator()
+            
+    elif args.model.type == 'ReflowDirectMinimumNoisedPhaseHidden':
+        from modules.reflow.vocoder import Vocoder
+        # load vocoder
+        vocoder = Vocoder(args.model.vocoder.type, args.model.vocoder.ckpt, device=args.device)
+        # if args.train.only_u2c_stack:
+        #     model = CombSubMinimumNoisedPhaseStackOnly(
+        #         n_unit=args.data.encoder_out_channels,
+        #         n_hidden_channels=args.model.units_hidden_channels
+        #     )
+        # else:
+        model = Unit2WavMinimumNoisedPhaseHidden(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_phase_offset=args.model.use_phase_offset,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            out_dims=vocoder.dimension,
+            # out_dims=args.model.units_hidden_channels,
+            n_layers=args.model.n_layers,
+            n_chans=args.model.n_chans,
+            )
+        model.ddsp_model.unit2ctrl.compile(mode="reduce-overhead")
+        model.reflow_model.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
+            # model_d = MultiPeriodSignalDiscriminator()
+            
+    elif args.model.type == 'NSFHiFiGAN':
+        # from modules.reflow.vocoder import Vocoder
+        # # load vocoder
+        # vocoder = Vocoder(args.model.vocoder.type, args.model.vocoder.ckpt, device=args.device)
+        # if args.train.only_u2c_stack:
+        #     model = CombSubMinimumNoisedPhaseStackOnly(
+        #         n_unit=args.data.encoder_out_channels,
+        #         n_hidden_channels=args.model.units_hidden_channels
+        #     )
+        # else:
+        model = NSFHiFiGAN(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            use_add_noise_env=args.model.use_add_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_phase_offset=args.model.use_phase_offset,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            noise_seed=args.model.noise_seed,
+            nsf_hifigan_h=args.model.nsf_hifigan,
+            )
+        model.unit2ctrl.compile()
+        model.generator.compile()
+        # model.unit2ctrl.compile(mode="reduce-overhead")
+        # model.generator.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
+            # model_d = MultiPeriodSignalDiscriminator()
+            
+    elif args.model.type == 'NMPSFHiFi':
+        model = NMPSFHiFi(
+            sampling_rate=args.data.sampling_rate,
+            block_size=args.data.block_size,
+            win_length=args.model.win_length,
+            n_unit=args.data.encoder_out_channels,
+            n_hidden_channels=args.model.units_hidden_channels,
+            n_spk=args.model.n_spk,
+            use_speaker_embed=args.model.use_speaker_embed,
+            use_embed_conv=not args.model.no_use_embed_conv,
+            spk_embed_channels=args.data.spk_embed_channels,
+            f0_input_variance=args.model.f0_input_variance,
+            f0_offset_size_downsamples=args.model.f0_offset_size_downsamples,
+            noise_env_size_downsamples=args.model.noise_env_size_downsamples,
+            harmonic_env_size_downsamples=args.model.harmonic_env_size_downsamples,
+            use_harmonic_env=args.model.use_harmonic_env,
+            use_noise_env=args.model.use_noise_env,
+            noise_to_harmonic_phase=args.model.noise_to_harmonic_phase,
+            add_noise=args.model.add_noise,
+            use_f0_offset=args.model.use_f0_offset,
+            use_short_filter=args.model.use_short_filter,
+            use_noise_short_filter=args.model.use_noise_short_filter,
+            use_pitch_aug=args.model.use_pitch_aug,
+            nsf_hifigan_in=args.model.nsf_hifigan.num_mels,
+            nsf_hifigan_h=args.model.nsf_hifigan,
+            noise_seed=args.model.noise_seed,
+            )
+        model.unit2ctrl.compile()
+        model.generator.compile()
+        # model.unit2ctrl.compile(mode="reduce-overhead")
+        # model.generator.compile(mode="reduce-overhead")
+        if args.model.use_discriminator:
+            model_d = MultiSpecDiscriminator()
             
     else:
         raise ValueError(f" [x] Unknown Model: {args.model.type}")
     
     
+    # model.unit2ctrl.compile(backend="onnxrt")
     # load model parameters
     optimizer = torch.optim.AdamW(model.parameters())
+    # model.unit2ctrl = torch.compile(model.unit2ctrl, mode="reduce-overhead")
+    # model.unit2ctrl.compile(mode="reduce-overhead")
     initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
+    # for param in model.parameters():
+    #     param.requires_grad = True
     
     lr = args.train.lr if states is None else states['last_lr'][0]
     
@@ -125,8 +396,13 @@ if __name__ == '__main__':
     if args.model.use_discriminator:
         # load discriminator model parameters
         optimizer_d = torch.optim.AdamW(model_d.parameters())
+        # model_d = torch.compile(model_d, mode="reduce-overhead")
+        # model_d.compile(backend="onnxrt")
         _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
-        lr = args.train.lr*2. if states is None else states['last_lr'][0]
+        # for param in model_d.parameters():
+        #     param.requires_grad = True
+        # lr = args.train.lr*2. if states is None else states['last_lr'][0]
+        lr = args.train.lr if states is None else states['last_lr'][0]
         
         for param_group in optimizer_d.param_groups:
             param_group['initial_lr'] = args.train.lr
@@ -178,5 +454,5 @@ if __name__ == '__main__':
     
     
     # run
-    train(args, initial_global_step, (model, optimizer, scheduler, loss_func), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
+    train(args, initial_global_step, (model, optimizer, scheduler, loss_func, vocoder), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
     

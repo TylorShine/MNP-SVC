@@ -6,8 +6,8 @@ local_attention
 matplotlib
 numpy
 onnx
-onnxruntime
-# onnxruntime-gpu   # for gpu
+# onnxruntime
+onnxruntime-gpu   # for gpu
 onnxsim
 PyYAML
 pyworld
@@ -21,7 +21,8 @@ torchfcpe
 tqdm
 transformers
 protobuf<=4.25.3    # wait to update tensorboard
-pysimplegui==4.60.5
+# pysimplegui==4.60.5
+freesimplegui
 sounddevice
 gradio
 pyannote.audio

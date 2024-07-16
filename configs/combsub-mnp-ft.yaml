@@ -38,7 +38,7 @@ model:
   no_use_embed_conv: false
   # n_spk: 768 # max number of different speakers when use_speaker_embed==false
 loss:
-  fft_min: 256
+  fft_min: 128
   fft_max: 2048
   use_dual_scale: false
   use_dual_scale_log_freq: false
@@ -58,18 +58,21 @@ train:
   cache_all_data: true # Save Internal-Memory or Graphics-Memory if it is false, but may be slow
   cache_device: 'cpu' # Set to 'cuda' to cache the data into the Graphics-Memory, fastest speed for strong gpu
   cache_fp16: true
-  epochs: 100000
+  epochs: 10000
   interval_log: 10
   interval_val: 2000
-  lr: 0.0005
+  lr: 0.0003
   weight_decay: 0
   sched_factor: 0.5
   sched_patience: 30
   sched_threshold: 0.00001
   sched_threshold_mode: 'rel'
   sched_cooldown: 2
-  sched_min_lr: 0.000003
+  sched_min_lr: 0.00001
   save_opt: false
+  ft_dense_out: true
+  # ft_speaker_embed: true
+  ft_speaker_embed_conv: true
   only_u2c_stack: false # Set true when pre-training the unit2ctrl unit conv stacks
   # only necessary when training the unit2ctrl unit conv stacks below
   frame_hop_random_min: 32

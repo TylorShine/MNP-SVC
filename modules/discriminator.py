@@ -123,6 +123,7 @@ class DiscriminatorSpec(torch.nn.Module):
         with torch.no_grad():
             x = self.spec(x)
             x, xp = torch.sqrt(x.real**2. + x.imag**2.), torch.atan2(x.imag, x.real)
+            # x = torch.sqrt(x.real**2. + x.imag**2.)
 
         for i, layer in enumerate(self.convs):
             x = layer(x)
@@ -174,10 +175,12 @@ class DiscriminatorS(torch.nn.Module):
                 norm_f(Conv1d(256, 1024, 41, 4, groups=64, padding=20)),
                 norm_f(Conv1d(1024, 1024, 41, 4, groups=256, padding=20)),
                 norm_f(Conv1d(1024, 1024, 5, 1, padding=2)),
+                # norm_f(Conv1d(256, 256, 5, 1, padding=2)),
             ]
         )
         # self.conv_post = norm_f(Conv1d(256, 1, 3, 1, padding=1))
         self.conv_post = SANConv1d(1024, 1, 3, 1, padding=1)
+        # self.conv_post = SANConv1d(256, 1, 3, 1, padding=1)
         
 
     def forward(self,
@@ -191,6 +194,55 @@ class DiscriminatorS(torch.nn.Module):
             x = F.leaky_relu(x, 0.1)
             # fmap.append(x)
         x = self.conv_post(x, flg_train=flg_train)
+        if flg_train:
+            x_fun, x_dir = x
+            fmap.append(x_fun)
+            x_fun = torch.flatten(x_fun, 1, -1)
+            x_dir = torch.flatten(x_dir, 1, -1)
+            x = (x_fun, x_dir)
+        else:
+            fmap.append(x)
+            x = torch.flatten(x, 1, -1)
+
+        return x, fmap
+    
+    
+class DiscriminatorP(torch.nn.Module):
+    def __init__(self, period, kernel_size=5, stride=3, use_spectral_norm=False):
+        super(DiscriminatorP, self).__init__()
+        self.period = period
+        self.d_mult = 1
+        norm_f = weight_norm if use_spectral_norm == False else spectral_norm
+        self.convs = nn.ModuleList([
+            norm_f(Conv2d(1, int(32*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            norm_f(Conv2d(int(32*self.d_mult), int(128*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            # norm_f(Conv2d(int(128*self.d_mult), int(512*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            # norm_f(Conv2d(int(512*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            # norm_f(Conv2d(int(1024*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
+            norm_f(Conv2d(int(128*self.d_mult), int(128*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
+        ])
+        # self.conv_post = norm_f(Conv2d(int(1024*self.d_mult), 1, (3, 1), 1, padding=(1, 0)))
+        # self.conv_post = SANConv2d(int(1024*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
+        self.conv_post = SANConv2d(int(128*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
+
+    def forward(self, x, flg_train: bool = False):
+        fmap = []
+
+        # 1d to 2d
+        b, c, t = x.shape
+        if t % self.period != 0: # pad first
+            n_pad = self.period - (t % self.period)
+            x = F.pad(x, (0, n_pad), "reflect")
+            t = t + n_pad
+        x = x.view(b, c, t // self.period, self.period)
+
+        for l in self.convs:
+            x = l(x)
+            fmap.append(x)
+            x = F.leaky_relu(x, 0.1)
+        x = self.conv_post(x, flg_train=flg_train)
+        # fmap.append(x)
+        # x = torch.flatten(x, 1, -1)
         if flg_train:
             x_fun, x_dir = x
             fmap.append(x_fun)
@@ -221,11 +273,52 @@ class MultiSpecDiscriminator(torch.nn.Module):
         # periods = [8, 14, 46, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
         # periods = [8, 14, 46, 178, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
         # periods = [10, 18, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
-        periods = [10, 14, 46, 178, 768]    # 10, 14, (first prime of < [n-1]*2)*2...
+        # periods = [10, 14, 46, 178, 768]    # 10, 14, (first prime of < [n-1]*2)*2...
+        # periods = [10, 14, 46]    # 10, 14, (first prime of < [n-1]*2)*2...
+        periods = [10, 14, 46, 178]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [
             DiscriminatorSpec(i, use_spectral_norm=use_spectral_norm) for i in periods
+        ]
+        self.discriminators = nn.ModuleList(discs)
+
+    def forward(
+        self,
+        y: torch.Tensor,
+        y_hat: torch.Tensor,
+        flg_train: bool = False,
+    ) -> tuple[
+        list[torch.Tensor], list[torch.Tensor], list[torch.Tensor], list[torch.Tensor]
+    ]:
+        y_d_rs = []
+        y_d_gs = []
+        fmap_rs = []
+        fmap_gs = []
+        for i, d in enumerate(self.discriminators):
+            y_d_r, fmap_r = d(y, flg_train=flg_train)
+            y_d_g, fmap_g = d(y_hat, flg_train=flg_train)
+            if flg_train:
+                y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
+                y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
+            else:
+                y_d_rs.append(y_d_r - y_d_g)
+                y_d_gs.append(y_d_g - y_d_r)
+            fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
+            fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
+
+        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
+    
+    
+class MultiPeriodSignalDiscriminator(torch.nn.Module):
+    def __init__(self, use_spectral_norm: bool = False) -> None:
+        super(MultiPeriodSignalDiscriminator, self).__init__()
+        # periods = [2, 3, 5, 7, 11]    # 10, 14, (first prime of < [n-1]*2)*2...
+        periods = [3, 11, 37]    # 10, 14, (first prime of < [n-1]*2)*2...
+
+        discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
+        discs = discs + [
+            DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods
         ]
         self.discriminators = nn.ModuleList(discs)
 

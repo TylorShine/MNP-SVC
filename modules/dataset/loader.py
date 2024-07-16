@@ -46,6 +46,7 @@ class AudioDataset(TorchDataset):
         use_aug=False,
         use_spk_embed=False,
         per_file_spk_embed=False,
+        use_mel=False,
         units_only=False,
     ):
         super().__init__()
@@ -56,6 +57,7 @@ class AudioDataset(TorchDataset):
         self.hop_size = hop_size
         self.whole_audio = whole_audio
         self.use_aug = use_aug
+        self.use_mel = use_mel,
         self.use_spk_embed = use_spk_embed
         self.per_file_spk_embed = per_file_spk_embed
         
@@ -122,6 +124,16 @@ class AudioDataset(TorchDataset):
                     # load audio
                     audio, sr = librosa.load(audio_path, sr=sampling_rate)
                     audio = torch.from_numpy(audio).to(device)
+                    
+                    if use_mel:
+                        # load mel
+                        path_mel = os.path.join(self.root_path, 'mel', file_rel, file_name) + '.npz'
+                        mel = np.load(path_mel)['mel']
+                        mel = torch.from_numpy(mel).to(device)
+                        
+                        # path_augmel = os.path.join(self.path_root, 'aug_mel', file_rel, file_name) + '.npz'
+                        # aug_mel = np.load(path_augmel)['aug_mel']
+                        # aug_mel = torch.from_numpy(aug_mel).to(device)
                 
                 # load volume
                 volume_path = os.path.join(self.root_path, 'volume', file_rel, file_name) + '.npz'
@@ -137,6 +149,9 @@ class AudioDataset(TorchDataset):
                 if cache_all_data and fp16:
                     audio = audio.half()
                     units = units.half()
+                    if use_mel:
+                        mel = mel.half()
+                    # aug_mel = aug_mel.half()
                 
                 self.data_buffer[file] = {
                     'duration': duration,
@@ -148,6 +163,9 @@ class AudioDataset(TorchDataset):
                 if cache_all_data:
                     self.data_buffer[file]['audio'] = audio
                     self.data_buffer[file]['units'] = units
+                    if use_mel:
+                        self.data_buffer[file]['mel'] = mel
+                        # self.data_buffer[file]['aug_mel'] = aug_mel
                 
                 if use_spk_embed:
                     if not self.per_file_spk_embed:
@@ -186,13 +204,17 @@ class AudioDataset(TorchDataset):
         start_frame = int(idx_from / frame_resolution)
         units_frame_len = int(crop_duration / frame_resolution)
         
+        aug_flag = random.choice([True, False]) and self.use_aug
+        file_dir, file_name = os.path.split(file)
+        file_rel = os.path.relpath(file_dir, start='data')
+        
         # load units
         if 'units' in data_buffer.keys():
             units = data_buffer['units'][start_frame : start_frame + units_frame_len]
         else:
             # load units
-            file_dir, file_name = os.path.split(file)
-            file_rel = os.path.relpath(file_dir, start='data')
+            # file_dir, file_name = os.path.split(file)
+            # file_rel = os.path.relpath(file_dir, start='data')
             units_dir = os.path.join(self.root_path, 'units', file_rel, file_name) + '.npz'
             units = np.load(units_dir)['units'][start_frame : start_frame + units_frame_len]
             units = torch.from_numpy(units).to(self.device)
@@ -202,6 +224,19 @@ class AudioDataset(TorchDataset):
         
         if self.units_only:
             return dict(spk_id=spk_id, units=units)
+        
+        if self.use_mel == True:
+            # load mel
+            # mel_key = 'aug_mel' if aug_flag else 'mel'
+            mel_key = 'mel'
+            mel = data_buffer.get(mel_key)
+            if mel is None:
+                mel = os.path.join(self.root_path, mel_key, file_rel, file_name) + '.npz'
+                mel = np.load(mel)[mel_key]
+                mel = mel[start_frame : start_frame + units_frame_len]
+                mel = torch.from_numpy(mel).float()
+            else:
+                mel = mel[start_frame : start_frame + units_frame_len]
         
         # load audio
         if 'audio' in data_buffer.keys():
@@ -240,6 +275,9 @@ class AudioDataset(TorchDataset):
         
         if self.use_spk_embed:
             data['spk_embed'] = data_buffer['spk_embed']
+            
+        if self.use_mel == True:
+            data['mel'] = mel
             
         return data
             
@@ -296,6 +334,7 @@ def get_data_loaders(args):
             fp16=args.train.cache_fp16,
             use_aug=True,
             use_spk_embed=args.model.use_speaker_embed,
+            use_mel="Diffusion" in args.model.type or "Reflow" in args.model.type,
             units_only=args.train.only_u2c_stack),
         batch_size=args.train.batch_size,
         shuffle=True,
@@ -320,6 +359,7 @@ def get_data_loaders(args):
                 device=args.train.cache_device,
                 use_aug=False,
                 use_spk_embed=args.model.use_speaker_embed,
+                use_mel="Diffusion" in args.model.type or "Reflow" in args.model.type,
                 units_only=args.train.only_u2c_stack),
             batch_size=1,
             shuffle=False,
