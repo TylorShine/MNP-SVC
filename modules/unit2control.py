@@ -146,7 +146,7 @@ class Unit2ControlGE2E(nn.Module):
         self.n_out = sum([v for v in output_splits.values()])
         self.dense_out = weight_norm(nn.Linear(n_hidden_channels, self.n_out), dim=0)
 
-    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None, aug_shift = None):
+    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None, aug_shift = None, infer = False):
         '''
         input: 
             B x n_frames x n_unit
@@ -226,6 +226,7 @@ class Unit2ControlGE2E(nn.Module):
             recon_spk_emb = self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 
         # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
+        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.7071*(1. if infer else 0.))
         recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
         x = x + self.recon[-1](recon)
         

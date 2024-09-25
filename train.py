@@ -11,7 +11,13 @@ from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhase
 from modules.diffusion.vocoder import Unit2WavMinimumNoisedPhase
 from modules.reflow.vocoder import Unit2WavMinimumNoisedPhase as Unit2WavMinimumNoisedPhaseReflow, Unit2WavMinimumNoisedPhaseDirect, Unit2WavMinimumNoisedPhaseHidden
 from modules.discriminator import MultiSpecDiscriminator, MultiPeriodSignalDiscriminator
-from modules.loss import RSSLoss, DSSLoss, DLFSSLoss, DLFSSMPLoss
+from modules.loss import (
+    RSSLoss, DSSLoss, DLFSSLoss,
+    DLFSSMPLoss, DLFSSMPMalLoss, DSMPMalLoss,
+    DLFSSMPMalinblogsLoss, DLFSSMalinblogsLoss, MRLFSSMPMalinblogsLoss, MRSMPMalinblogsLoss,
+    MRSMPL1Loss, MRLF4SMPMalinblogsLoss, MRRSMalinblogsLoss,
+    MelLoss
+)
 
 
 torch.backends.cudnn.benchmark = True
@@ -70,14 +76,19 @@ if __name__ == '__main__':
                 add_noise=args.model.add_noise,
                 use_phase_offset=args.model.use_phase_offset,
                 use_f0_offset=args.model.use_f0_offset,
+                no_use_noise=args.model.no_use_noise,
                 use_short_filter=args.model.use_short_filter,
                 use_noise_short_filter=args.model.use_noise_short_filter,
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
+            torch.set_float32_matmul_precision('high')
+            # model.unit2ctrl.compile()
+            model.unit2ctrl.compile(mode="reduce-overhead")
             if args.model.use_discriminator:
                 model_d = MultiSpecDiscriminator()
                 # model_d = MultiPeriodSignalDiscriminator()
+                # model_d.compile(mode="reduce-overhead")
     elif args.model.type == 'DiffusionMinimumNoisedPhase':
         from modules.diffusion.vocoder import Vocoder
         # load vocoder
@@ -301,8 +312,8 @@ if __name__ == '__main__':
         # model.unit2ctrl.compile(mode="reduce-overhead")
         # model.generator.compile(mode="reduce-overhead")
         if args.model.use_discriminator:
-            model_d = MultiSpecDiscriminator()
-            # model_d = MultiPeriodSignalDiscriminator()
+            # model_d = MultiSpecDiscriminator()
+            model_d = MultiPeriodSignalDiscriminator()
             
     elif args.model.type == 'NMPSFHiFi':
         model = NMPSFHiFi(
@@ -344,19 +355,20 @@ if __name__ == '__main__':
     
     # model.unit2ctrl.compile(backend="onnxrt")
     # load model parameters
-    optimizer = torch.optim.AdamW(model.parameters())
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay)
     # model.unit2ctrl = torch.compile(model.unit2ctrl, mode="reduce-overhead")
     # model.unit2ctrl.compile(mode="reduce-overhead")
-    initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
-    # for param in model.parameters():
-    #     param.requires_grad = True
     
-    lr = args.train.lr if states is None else states['last_lr'][0]
+    # initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
+    # # for param in model.parameters():
+    # #     param.requires_grad = True
     
-    for param_group in optimizer.param_groups:
-        param_group['initial_lr'] = args.train.lr
-        param_group['lr'] = lr
-        param_group['weight_decay'] = args.train.weight_decay
+    # lr = args.train.lr if states is None else states['last_lr'][0]
+    
+    # for param_group in optimizer.param_groups:
+    #     param_group['initial_lr'] = args.train.lr
+    #     param_group['lr'] = lr
+    #     param_group['weight_decay'] = args.train.weight_decay
         
     if args.train.only_u2c_stack:
         scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
@@ -364,15 +376,15 @@ if __name__ == '__main__':
         scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
                                                             threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
                                                             cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-        if states is not None:
-            sched_states = states.get('scheduler')
-            if sched_states is not None:
-                scheduler.best = sched_states['best']
-                scheduler.cooldown_counter = sched_states['cooldown_counter']
-                scheduler.num_bad_epochs = sched_states['num_bad_epochs']
-                scheduler._last_lr = sched_states['_last_lr']
-        else:
-            scheduler._last_lr = (lr,)
+        # if states is not None:
+        #     sched_states = states.get('scheduler')
+        #     if sched_states is not None:
+        #         scheduler.best = sched_states['best']
+        #         scheduler.cooldown_counter = sched_states['cooldown_counter']
+        #         scheduler.num_bad_epochs = sched_states['num_bad_epochs']
+        #         scheduler._last_lr = sched_states['_last_lr']
+        # else:
+        #     scheduler._last_lr = (lr,)
     else:
         # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
         scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
@@ -389,59 +401,91 @@ if __name__ == '__main__':
     elif args.loss.use_dual_scale_log_freq_magphase:
         loss_func = DLFSSMPLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_magphase_mall:
+        loss_func = DLFSSMPMalLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_magphase_mall:
+        loss_func = DSMPMalLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_magphase_malinblogs:
+        loss_func = DLFSSMPMalinblogsLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_malinblogs:
+        loss_func = DLFSSMalinblogsLoss(args.loss.fft_min, args.loss.fft_max,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_multi_reso_log_freq_magphase_malinblogs:
+        loss_func = MRLFSSMPMalinblogsLoss(args.loss.n_fft, args.loss.n_div,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_multi_reso_log_freq_malinblogs:
+        loss_func = MRSMPMalinblogsLoss(args.loss.n_fft, args.loss.n_div,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_freq_win_log_freq_magphase_malinblogs:
+        loss_func = MRLF4SMPMalinblogsLoss(args.loss.n_fft, args.loss.n_div,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_multi_reso_magphase_l1:
+        loss_func = MRSMPL1Loss(args.loss.n_fft, args.loss.n_div,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_multi_reso_resample_malinblogs:
+        loss_func = MRRSMalinblogsLoss(args.loss.n_fft, args.loss.n_div,
+                            beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_mel:
+        loss_func = MelLoss(n_fft=args.loss.n_fft, n_mels=args.loss.n_mels, 
+                            sample_rate=args.data.sampling_rate, device=args.device)
     else:
         loss_func = RSSLoss(args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, device=args.device)
         
         
     if args.model.use_discriminator:
         # load discriminator model parameters
-        optimizer_d = torch.optim.AdamW(model_d.parameters())
+        optimizer_d = torch.optim.AdamW(model_d.parameters(), lr=args.train.lr*0.5, weight_decay=args.train.weight_decay)
         # model_d = torch.compile(model_d, mode="reduce-overhead")
         # model_d.compile(backend="onnxrt")
-        _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
-        # for param in model_d.parameters():
-        #     param.requires_grad = True
-        # lr = args.train.lr*2. if states is None else states['last_lr'][0]
-        lr = args.train.lr if states is None else states['last_lr'][0]
         
-        for param_group in optimizer_d.param_groups:
-            param_group['initial_lr'] = args.train.lr
-            param_group['lr'] = lr
-            param_group['weight_decay'] = args.train.weight_decay
+        # _, model_d, optimizer_d, states = load_model(args.env.expdir, model_d, optimizer_d, name='modelD', device=args.device)
+        
+        # # for param in model_d.parameters():
+        # #     param.requires_grad = True
+        # # lr = args.train.lr*2. if states is None else states['last_lr'][0]
+        # lr = args.train.lr*0.5 if states is None else states['last_lr'][0]
+        
+        # for param_group in optimizer_d.param_groups:
+        #     param_group['initial_lr'] = args.train.lr*0.5
+        #     param_group['lr'] = lr
+        #     param_group['weight_decay'] = args.train.weight_decay
             
         # scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
         #                                                          threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
         #                                                          cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*2.)
+        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*0.5)
     
-        if states is not None:
-            sched_states = states.get('scheduler')
-            if sched_states is not None:
-                # scheduler_d.best = sched_states['best']
-                # scheduler_d.cooldown_counter = sched_states['cooldown_counter']
-                # scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
-                scheduler_d._last_lr = sched_states['_last_lr']
-        else:
-            scheduler_d._last_lr = (lr,)
+        # if states is not None:
+        #     sched_states = states.get('scheduler')
+        #     if sched_states is not None:
+        #         # scheduler_d.best = sched_states['best']
+        #         # scheduler_d.cooldown_counter = sched_states['cooldown_counter']
+        #         # scheduler_d.num_bad_epochs = sched_states['num_bad_epochs']
+        #         scheduler_d._last_lr = sched_states['_last_lr']
+        # else:
+        #     scheduler_d._last_lr = torch.tensor((lr,))
     else:
         model_d, optimizer_d, scheduler_d = None, None, None
         
     
 
 
-    # device
-    if args.device == 'cuda':
-        torch.cuda.set_device(args.env.gpu_id)
-    model.to(args.device)
-    if model_d is not None:
-        model_d.to(args.device)
+    # # device
+    # if args.device == 'cuda':
+    #     torch.cuda.set_device(args.env.gpu_id)
+    # model.to(args.device)
+    # if model_d is not None:
+    #     model_d.to(args.device)
     
-    for state in optimizer.state.values():
-        for k, v in state.items():
-            if torch.is_tensor(v):
-                state[k] = v.to(args.device)
+    # for state in optimizer.state.values():
+    #     for k, v in state.items():
+    #         if torch.is_tensor(v):
+    #             state[k] = v.to(args.device)
                     
-    loss_func.to(args.device)
+    # loss_func.to(args.device)
 
 
     # datas
@@ -454,5 +498,5 @@ if __name__ == '__main__':
     
     
     # run
-    train(args, initial_global_step, (model, optimizer, scheduler, loss_func, vocoder), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
+    train(args, 0, (model, optimizer, scheduler, loss_func, vocoder), (model_d, optimizer_d, scheduler_d), loaders['train'], loaders['test'])
     

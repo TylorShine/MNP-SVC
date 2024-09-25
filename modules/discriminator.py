@@ -25,7 +25,8 @@ class DiscriminatorSpec(torch.nn.Module):
         super(DiscriminatorSpec, self).__init__()
         self.period = period
         # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
-        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
+        # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
+        self.spec = torchaudio.transforms.Spectrogram(period, center=True, pad_mode="reflect", power=None)
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
         self.convs = nn.ModuleList(
@@ -81,39 +82,39 @@ class DiscriminatorSpec(torch.nn.Module):
         )
         self.conv_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
         
-        self.convs_p = nn.ModuleList(
-            [
-                norm_f(
-                    Conv2d(
-                        1,
-                        16,
-                        (kernel_size, 7),
-                        (stride, 2),
-                        padding=(get_keep_size_padding(kernel_size, 1), 2),
-                    )
-                ),
-                norm_f(
-                    Conv2d(
-                        16,
-                        32,
-                        (kernel_size, 7),
-                        (stride, 2),
-                        padding=(get_keep_size_padding(kernel_size, 1), 2),
-                    )
-                ),
+        # self.convs_p = nn.ModuleList(
+        #     [
+        #         norm_f(
+        #             Conv2d(
+        #                 1,
+        #                 16,
+        #                 (kernel_size, 7),
+        #                 (stride, 2),
+        #                 padding=(get_keep_size_padding(kernel_size, 1), 2),
+        #             )
+        #         ),
+        #         norm_f(
+        #             Conv2d(
+        #                 16,
+        #                 32,
+        #                 (kernel_size, 7),
+        #                 (stride, 2),
+        #                 padding=(get_keep_size_padding(kernel_size, 1), 2),
+        #             )
+        #         ),
                 
-                norm_f(
-                    Conv2d(
-                        32,
-                        32,
-                        (kernel_size, 3),
-                        (1, 1),
-                        padding=(get_keep_size_padding(kernel_size, 1), 2),
-                    )
-                ),
-            ]
-        )
-        self.conv_p_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
+        #         norm_f(
+        #             Conv2d(
+        #                 32,
+        #                 32,
+        #                 (kernel_size, 3),
+        #                 (1, 1),
+        #                 padding=(get_keep_size_padding(kernel_size, 1), 2),
+        #             )
+        #         ),
+        #     ]
+        # )
+        # self.conv_p_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
 
     def forward(self,
                 x: torch.Tensor,
@@ -121,9 +122,13 @@ class DiscriminatorSpec(torch.nn.Module):
         fmap = []
 
         with torch.no_grad():
-            x = self.spec(x)
-            x, xp = torch.sqrt(x.real**2. + x.imag**2.), torch.atan2(x.imag, x.real)
+            # x = self.spec(x)
+            # x, xp = torch.sqrt(x.real**2. + x.imag**2.), torch.atan2(x.imag, x.real)
             # x = torch.sqrt(x.real**2. + x.imag**2.)
+            
+            x = self.spec(x)
+            x = torch.view_as_real(x)
+            x = torch.norm(x, p='fro', dim=-1)
 
         for i, layer in enumerate(self.convs):
             x = layer(x)
@@ -141,23 +146,23 @@ class DiscriminatorSpec(torch.nn.Module):
             fmap.append(x)
             x = torch.flatten(x, 1, -1)
         
-        for i, layer in enumerate(self.convs_p):
-            xp = layer(xp)
-            fmap.append(xp)
-            xp = F.leaky_relu(xp, 0.1)
-            # fmap.append(x)
-        xp = self.conv_p_post(xp, flg_train=flg_train)
-        if flg_train:
-            xp_fun, xp_dir = xp
-            fmap.append(xp_fun)
-            xp_fun = torch.flatten(xp_fun, 1, -1)
-            xp_dir = torch.flatten(xp_dir, 1, -1)
-            x[0] = torch.cat((x[0], xp_fun), dim=1)
-            x[1] = torch.cat((x[1], xp_dir), dim=1)
-        else:
-            fmap.append(xp)
-            xp = torch.flatten(xp, 1, -1)
-            x = torch.cat((x, xp), dim=1)
+        # for i, layer in enumerate(self.convs_p):
+        #     xp = layer(xp)
+        #     fmap.append(xp)
+        #     xp = F.leaky_relu(xp, 0.1)
+        #     # fmap.append(x)
+        # xp = self.conv_p_post(xp, flg_train=flg_train)
+        # if flg_train:
+        #     xp_fun, xp_dir = xp
+        #     fmap.append(xp_fun)
+        #     xp_fun = torch.flatten(xp_fun, 1, -1)
+        #     xp_dir = torch.flatten(xp_dir, 1, -1)
+        #     x[0] = torch.cat((x[0], xp_fun), dim=1)
+        #     x[1] = torch.cat((x[1], xp_dir), dim=1)
+        # else:
+        #     fmap.append(xp)
+        #     xp = torch.flatten(xp, 1, -1)
+        #     x = torch.cat((x, xp), dim=1)
 
         # return x, fmap
         return x, fmap
@@ -190,9 +195,9 @@ class DiscriminatorS(torch.nn.Module):
 
         for i, layer in enumerate(self.convs):
             x = layer(x)
-            fmap.append(x)
-            x = F.leaky_relu(x, 0.1)
             # fmap.append(x)
+            x = F.leaky_relu(x, 0.1)
+            fmap.append(x)
         x = self.conv_post(x, flg_train=flg_train)
         if flg_train:
             x_fun, x_dir = x
@@ -216,14 +221,14 @@ class DiscriminatorP(torch.nn.Module):
         self.convs = nn.ModuleList([
             norm_f(Conv2d(1, int(32*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
             norm_f(Conv2d(int(32*self.d_mult), int(128*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
-            # norm_f(Conv2d(int(128*self.d_mult), int(512*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
-            # norm_f(Conv2d(int(512*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
-            # norm_f(Conv2d(int(1024*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
-            norm_f(Conv2d(int(128*self.d_mult), int(128*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
+            norm_f(Conv2d(int(128*self.d_mult), int(512*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            norm_f(Conv2d(int(512*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), (stride, 1), padding=(get_keep_size_padding(5, 1), 0))),
+            norm_f(Conv2d(int(1024*self.d_mult), int(1024*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
+            # norm_f(Conv2d(int(128*self.d_mult), int(128*self.d_mult), (kernel_size, 1), 1, padding=(2, 0))),
         ])
         # self.conv_post = norm_f(Conv2d(int(1024*self.d_mult), 1, (3, 1), 1, padding=(1, 0)))
-        # self.conv_post = SANConv2d(int(1024*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
-        self.conv_post = SANConv2d(int(128*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
+        self.conv_post = SANConv2d(int(1024*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
+        # self.conv_post = SANConv2d(int(128*self.d_mult), 1, (3, 1), 1, padding=(1, 0))
 
     def forward(self, x, flg_train: bool = False):
         fmap = []
@@ -238,8 +243,9 @@ class DiscriminatorP(torch.nn.Module):
 
         for l in self.convs:
             x = l(x)
-            fmap.append(x)
+            # fmap.append(x)
             x = F.leaky_relu(x, 0.1)
+            fmap.append(x)
         x = self.conv_post(x, flg_train=flg_train)
         # fmap.append(x)
         # x = torch.flatten(x, 1, -1)
@@ -275,7 +281,12 @@ class MultiSpecDiscriminator(torch.nn.Module):
         # periods = [10, 18, 768]    # 4, 6, (first prime of < [n-1]*2)*2...
         # periods = [10, 14, 46, 178, 768]    # 10, 14, (first prime of < [n-1]*2)*2...
         # periods = [10, 14, 46]    # 10, 14, (first prime of < [n-1]*2)*2...
-        periods = [10, 14, 46, 178]
+        # periods = [10, 14, 46, 178]
+        # periods = [7, 13, 23]
+        # periods = [7, 13, 46, 178]
+        # periods = [7, 13, 43]
+        # periods = [3, 7, 17]
+        periods = [128, 512, 2048]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [
@@ -298,14 +309,18 @@ class MultiSpecDiscriminator(torch.nn.Module):
         for i, d in enumerate(self.discriminators):
             y_d_r, fmap_r = d(y, flg_train=flg_train)
             y_d_g, fmap_g = d(y_hat, flg_train=flg_train)
-            if flg_train:
-                y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
-                y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
-            else:
-                y_d_rs.append(y_d_r - y_d_g)
-                y_d_gs.append(y_d_g - y_d_r)
-            fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
-            fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
+            # if flg_train:
+            #     y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
+            #     y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
+            # else:
+            #     y_d_rs.append(y_d_r - y_d_g)
+            #     y_d_gs.append(y_d_g - y_d_r)
+            y_d_rs.append(y_d_r)
+            y_d_gs.append(y_d_g)
+            # fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
+            # fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
+            fmap_rs.append(fmap_r)
+            fmap_gs.append(fmap_g)
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs
     
@@ -313,8 +328,8 @@ class MultiSpecDiscriminator(torch.nn.Module):
 class MultiPeriodSignalDiscriminator(torch.nn.Module):
     def __init__(self, use_spectral_norm: bool = False) -> None:
         super(MultiPeriodSignalDiscriminator, self).__init__()
-        # periods = [2, 3, 5, 7, 11]    # 10, 14, (first prime of < [n-1]*2)*2...
-        periods = [3, 11, 37]    # 10, 14, (first prime of < [n-1]*2)*2...
+        periods = [2, 3, 5, 7, 11]    # 10, 14, (first prime of < [n-1]*2)*2...
+        # periods = [3, 11, 37]    # 10, 14, (first prime of < [n-1]*2)*2...
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [
@@ -337,13 +352,17 @@ class MultiPeriodSignalDiscriminator(torch.nn.Module):
         for i, d in enumerate(self.discriminators):
             y_d_r, fmap_r = d(y, flg_train=flg_train)
             y_d_g, fmap_g = d(y_hat, flg_train=flg_train)
-            if flg_train:
-                y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
-                y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
-            else:
-                y_d_rs.append(y_d_r - y_d_g)
-                y_d_gs.append(y_d_g - y_d_r)
-            fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
-            fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
+            # if flg_train:
+            #     y_d_rs.append([ydr - ydg for ydr, ydg in zip(y_d_r, y_d_g)])
+            #     y_d_gs.append([ydg - ydr for ydr, ydg in zip(y_d_r, y_d_g)])
+            # else:
+            #     y_d_rs.append(y_d_r - y_d_g)
+            #     y_d_gs.append(y_d_g - y_d_r)
+            y_d_rs.append(y_d_r)
+            y_d_gs.append(y_d_g)
+            # fmap_rs.append([fr - fg for fr, fg in zip(fmap_r, fmap_g)])
+            # fmap_gs.append([fg - fr for fr, fg in zip(fmap_r, fmap_g)])
+            fmap_rs.append(fmap_r)
+            fmap_gs.append(fmap_g)
 
         return y_d_rs, y_d_gs, fmap_rs, fmap_gs

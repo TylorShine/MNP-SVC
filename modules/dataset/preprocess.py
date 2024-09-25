@@ -94,18 +94,77 @@ PREPROCESSOR_PARAMS: PreprocessorParameters = None
 def preprocess_main(root_path: str, dataset: dict[str, dict[str, str]], params: PreprocessorParameters = PREPROCESSOR_PARAMS):
     data_dir = os.path.join(params.common['data_dir'], 'data')
     
+    units_extracted = False
+    
+    # f0
+    if params.f0_extractor is not None:
+        f0_extractor = F0Extractor(**params.f0_extractor)
+        f0_dir = os.path.join(params.common['data_dir'], 'f0')
+        if params.units_encoder['encoder'] == 'phrex':
+            # extract units with phrex
+            units_encoder = UnitsEncoder(**params.units_encoder)
+            units_dir = os.path.join(params.common['data_dir'], 'units')
+            for path in tqdm(dataset.keys(), desc='Extract f0 and units'):
+                # audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+                audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+                # audio, sr = librosa.load(os.path.join(root_path, path), sr=params.units_encoder['encoder_sample_rate'])
+                # f0 = f0_extractor.extract(audio, device=params.common['device'])
+                # f0 = torch.from_numpy(f0).to(dtype=torch.float32, device=params.common['device'])
+                # f0_uv = f0 == 0
+                
+                # # alignment f0 with units
+                # n_frames = audio.shape[-1] // f0_extractor.hop_size + 1
+                # ratio = (units_encoder.encoder_hop_size / units_encoder.encoder_sample_rate) / (f0_extractor.hop_size / sr)
+                # index = torch.clamp(torch.round(ratio * torch.arange(n_frames).to(params.common['device'])).long(), max = f0.shape[-1] - 1)
+                # # repeats = [1, 1, f0.shape[-1]]
+                # # index = index.unsqueeze(0).unsqueeze(-1).repeat(repeats)
+                # f0_aligned = torch.gather(f0, 0, index)
+                units_all = units_encoder.encode(
+                    torch.from_numpy(audio).to(params.common['device'], dtype=torch.float32).unsqueeze(0),
+                    sr,
+                    params.common['block_size']).squeeze()
+                    # f0 = f0_aligned)
+                units, f0 = units_all[:, :-1], units_all[:, -1]
+                f0_uv = f0 < params.f0_extractor['f0_min']
+                # print(units_all.shape, units.shape, f0.shape)
+                units_path = os.path.join(units_dir, os.path.relpath(path, start='data'))
+                
+                f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(params.common['sample_rate']/params.common['block_size']) + float(params.common['sample_rate']/params.common['block_size'])
+                f0_path = os.path.join(f0_dir, os.path.relpath(path, start='data'))
+                
+                os.makedirs(os.path.dirname(f0_path), exist_ok=True)
+                np.savez_compressed(f'{f0_path}.npz', f0=f0.cpu().numpy())
+                os.makedirs(os.path.dirname(units_path), exist_ok=True)
+                np.savez_compressed(f'{units_path}.npz', units=units.squeeze().cpu().numpy())
+            del units_encoder
+            units_encoder = None
+            units_extracted = True
+        else:
+            for path in tqdm(dataset.keys(), desc='Extract f0'):
+                audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+                f0 = f0_extractor.extract(audio, device=params.common['device'])
+                f0_uv = f0 == 0    
+                f0[f0_uv] = np.random.rand(*f0[f0_uv].shape)*float(params.common['sample_rate']/params.common['block_size']) + float(params.common['sample_rate']/params.common['block_size'])
+                # f0_path = os.path.join(f0_dir, os.path.relpath(path, start=data_dir))
+                f0_path = os.path.join(f0_dir, os.path.relpath(path, start='data'))
+                os.makedirs(os.path.dirname(f0_path), exist_ok=True)
+                np.savez_compressed(f'{f0_path}.npz', f0=f0)
+        del f0_extractor
+        f0_extractor = None
+    
     # units
-    units_encoder = UnitsEncoder(**params.units_encoder)
-    units_dir = os.path.join(params.common['data_dir'], 'units')
-    for path in tqdm(dataset.keys(), desc='Extract units'):
-        audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
-        units = units_encoder.encode(
-            torch.from_numpy(audio).to(params.common['device'], dtype=torch.float32).unsqueeze(0), sr, params.common['block_size'])
-        units_path = os.path.join(units_dir, os.path.relpath(path, start='data'))
-        os.makedirs(os.path.dirname(units_path), exist_ok=True)
-        np.savez_compressed(f'{units_path}.npz', units=units.squeeze().cpu().numpy())
-    del units_encoder
-    units_encoder = None
+    if units_extracted == False:
+        units_encoder = UnitsEncoder(**params.units_encoder)
+        units_dir = os.path.join(params.common['data_dir'], 'units')
+        for path in tqdm(dataset.keys(), desc='Extract units'):
+            audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+            units = units_encoder.encode(
+                torch.from_numpy(audio).to(params.common['device'], dtype=torch.float32).unsqueeze(0), sr, params.common['block_size'])
+            units_path = os.path.join(units_dir, os.path.relpath(path, start='data'))
+            os.makedirs(os.path.dirname(units_path), exist_ok=True)
+            np.savez_compressed(f'{units_path}.npz', units=units.squeeze().cpu().numpy())
+        del units_encoder
+        units_encoder = None
     
     # volume
     volume_extractor = VolumeExtractor(**params.volume_extractor)
@@ -117,36 +176,20 @@ def preprocess_main(root_path: str, dataset: dict[str, dict[str, str]], params: 
         volume_path = os.path.join(volume_dir, os.path.relpath(path, start='data'))
         os.makedirs(os.path.dirname(volume_path), exist_ok=True)
         np.savez_compressed(f'{volume_path}.npz', volume=volume)
-    
-    # f0
-    if params.f0_extractor is not None:
-        f0_extractor = F0Extractor(**params.f0_extractor)
-        f0_dir = os.path.join(params.common['data_dir'], 'f0')
-        for path in tqdm(dataset.keys(), desc='Extract f0'):
-            audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
-            f0 = f0_extractor.extract(audio, device=params.common['device'])
-            f0_uv = f0 == 0
-            f0[f0_uv] = np.random.rand(*f0[f0_uv].shape)*float(params.common['sample_rate']/params.common['block_size']) + float(params.common['sample_rate']/params.common['block_size'])
-            # f0_path = os.path.join(f0_dir, os.path.relpath(path, start=data_dir))
-            f0_path = os.path.join(f0_dir, os.path.relpath(path, start='data'))
-            os.makedirs(os.path.dirname(f0_path), exist_ok=True)
-            np.savez_compressed(f'{f0_path}.npz', f0=f0)
-        del f0_extractor
-        f0_extractor = None
         
-    # mel
-    if params.mel_extractor is not None:
-        mel_extractor = MelExtractor(**params.mel_extractor)
-        mel_dir = os.path.join(params.common['data_dir'], 'mel')
-        for path in tqdm(dataset.keys(), desc='Extract mel'):
-            audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
-            mel = mel_extractor.extract(torch.from_numpy(audio).float().to(mel_extractor.device).unsqueeze(0), sample_rate=sr)
-            mel = mel.squeeze().cpu().numpy()
-            mel_path = os.path.join(mel_dir, os.path.relpath(path, start='data'))
-            os.makedirs(os.path.dirname(mel_path), exist_ok=True)
-            np.savez_compressed(f'{mel_path}.npz', mel=mel)
-        del mel_extractor
-        mel_extractor = None
+    # # mel
+    # if params.mel_extractor is not None:
+    #     mel_extractor = MelExtractor(**params.mel_extractor)
+    #     mel_dir = os.path.join(params.common['data_dir'], 'mel')
+    #     for path in tqdm(dataset.keys(), desc='Extract mel'):
+    #         audio, sr = librosa.load(os.path.join(root_path, path), sr=None)
+    #         mel = mel_extractor.extract(torch.from_numpy(audio).float().to(mel_extractor.device).unsqueeze(0), sample_rate=sr)
+    #         mel = mel.squeeze().cpu().numpy()
+    #         mel_path = os.path.join(mel_dir, os.path.relpath(path, start='data'))
+    #         os.makedirs(os.path.dirname(mel_path), exist_ok=True)
+    #         np.savez_compressed(f'{mel_path}.npz', mel=mel)
+    #     del mel_extractor
+    #     mel_extractor = None
 
 
 def preprocess_spkinfo(root_path: str, dataset: dict[str, dict[str, str]], split: str = "", params: PreprocessorParameters = PREPROCESSOR_PARAMS):

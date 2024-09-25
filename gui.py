@@ -49,6 +49,7 @@ class SvcDDSP:
         self.pitch_extractor = None
         self.select_pitch_extractor = None
         self.pitch_extractor_sample_rate = None
+        self.args = None
 
     def update_model(self, model_path):
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
@@ -92,13 +93,14 @@ class SvcDDSP:
     
     
     def update_pitch_extractor(self, pitch_extractor_type, sample_rate):
-        hop_size = self.args.data.block_size * sample_rate / self.args.data.sampling_rate
-        self.pitch_extractor = F0Extractor(
-            pitch_extractor_type,
-            sample_rate,
-            hop_size,
-            self.args.data.f0_min,
-            self.args.data.f0_max)
+        if self.args is not None:
+            hop_size = self.args.data.block_size * sample_rate / self.args.data.sampling_rate
+            self.pitch_extractor = F0Extractor(
+                pitch_extractor_type,
+                sample_rate,
+                hop_size,
+                self.args.data.f0_min,
+                self.args.data.f0_max)
         self.select_pitch_extractor = pitch_extractor_type
         self.pitch_extractor_sample_rate = sample_rate
                 
@@ -135,7 +137,8 @@ class SvcDDSP:
         #     hop_size,
         #     self.args.data.f0_min,
         #     self.args.data.f0_max)
-        f0 = self.pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        # f0 = self.pitch_extractor.extract(audio, uv_interp=True, device=self.device, silence_front=silence_front)
+        f0 = self.pitch_extractor.extract(audio, uv_interp=False, device=self.device, silence_front=silence_front)
         f0 = torch.from_numpy(f0).float().to(self.device).unsqueeze(-1).unsqueeze(0)
         f0_uv = f0 == 0
         f0[f0_uv] = torch.rand_like(f0[f0_uv])*float(self.args.data.sampling_rate/self.args.data.block_size) + float(self.args.data.sampling_rate/self.args.data.block_size)
@@ -191,7 +194,8 @@ class SvcDDSP:
 class Config:
     def __init__(self) -> None:
         self.samplerate = 44100  # Hz
-        self.block_time = 0.3  # s
+        # self.block_time = 0.3  # s
+        self.block_time = 64  # frames
         self.f_pitch_change: float = 0.0  # float(request_form.get("fPitchChange", 0))
         self.f_intonation: float = 1.0
         self.f_intonation_base: float = 200.0
@@ -278,7 +282,7 @@ class GUI:
             [sg.Frame(layout=[
                 [sg.Text(i18n("说话人id")), sg.Input(key='spk_id', default_text='1'), sg.Text("", key='spk_name')],
                 [sg.Text(i18n("响应阈值")),
-                 sg.Slider(range=(-60, 0), orientation='h', key='threhold', resolution=1, default_value=-45,
+                 sg.Slider(range=(-60, 0), orientation='h', key='threhold', resolution=1, default_value=-50,
                            enable_events=True)],
                 [sg.Text(i18n("变调")),
                  sg.Slider(range=(-24, 24), orientation='h', key='pitch', resolution=1, default_value=0,
@@ -295,13 +299,18 @@ class GUI:
             ], title=i18n('普通设置')),
                 sg.Frame(layout=[
                     [sg.Text(i18n("音频切分大小")),
-                     sg.Slider(range=(0.05, 3.0), orientation='h', key='block', resolution=0.01, default_value=0.3,
+                    #  sg.Slider(range=(0.05, 3.0), orientation='h', key='block', resolution=0.01, default_value=0.3,
+                     sg.Slider(range=(1, 256), orientation='h', key='block', resolution=1, default_value=64,
                                enable_events=True)],
                     [sg.Text(i18n("交叉淡化时长")),
-                     sg.Slider(range=(0.01, 0.15), orientation='h', key='crossfade', resolution=0.01,
+                    #  sg.Slider(range=(0.0, 0.15), orientation='h', key='crossfade', resolution=0.005,
+                    #            default_value=0.04, enable_events=True)],
+                                # default_value=0.0, enable_events=True)],
+                     sg.Slider(range=(0.0, 0.5), orientation='h', key='crossfade', resolution=0.005,
                                default_value=0.04, enable_events=True)],
                     [sg.Text(i18n("额外推理时长")),
-                     sg.Slider(range=(0.05, 5), orientation='h', key='extra', resolution=0.01, default_value=2.0,
+                    #  sg.Slider(range=(0.05, 5), orientation='h', key='extra', resolution=0.01, default_value=2.0,
+                     sg.Slider(range=(0.0, 5.), orientation='h', key='extra', resolution=0.01, default_value=0.0,
                                enable_events=True)],
                     [sg.Text(i18n("f0预测模式")),
                      sg.Combo(values=self.f0_mode_list, key='f0_mode', default_value=self.f0_mode_list[-1],
@@ -329,6 +338,8 @@ class GUI:
                 flag_vc = False
                 exit()
             elif event == "start_vc" and not flag_vc:
+                # preload model
+                self.device = self.svc_model.update_model(values['sg_model'])   # read values{} is not good practice but for avoid circulate ref.
                 # set values 和界面布局layout顺序一一对应
                 self.set_values(values)
                 print('block_time:' + str(self.config.block_time))
@@ -380,16 +391,19 @@ class GUI:
         self.config.f_intonation = values['intonation']
         self.config.f_intonation_base = values['intonation_base']
         self.config.samplerate = int(values['samplerate'])
-        self.config.block_time = float(values['block'])
+        # self.config.block_time = float(values['block'])
+        self.config.block_time = int(values['block'])
         self.config.crossfade_time = float(values['crossfade'])
         self.config.extra_time = float(values['extra'])
         self.config.select_pitch_extractor = values['f0_mode']
         self.config.use_phase_vocoder = values['use_phase_vocoder']
         self.config.use_spk_mix = values['spk_mix']
-        self.block_frame = int(self.config.block_time * self.config.samplerate)
-        self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate)
+        self.block_frame = int(self.config.block_time * self.svc_model.args.data.block_size + 0.5)
+        # self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate)
+        self.crossfade_frame = int(self.config.crossfade_time * self.block_frame + 0.5)
         self.sola_search_frame = int(0.01 * self.config.samplerate)
         self.last_delay_frame = int(0.02 * self.config.samplerate)
+        # self.last_delay_frame = 1
         self.extra_frame = int(self.config.extra_time * self.config.samplerate)
         self.input_frame = max(
             self.block_frame + self.crossfade_frame + self.sola_search_frame + 2 * self.last_delay_frame,
@@ -428,10 +442,21 @@ class GUI:
         self.update_spk(self.config.spk_id)
         self.svc_model.update_pitch_extractor(self.config.select_pitch_extractor, self.config.samplerate)
         self.input_wav = np.zeros(self.input_frame, dtype='float32')
-        self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
-        self.fade_in_window = torch.sin(
-            np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
-        self.fade_out_window = 1 - self.fade_in_window
+        if self.crossfade_frame > 0:
+            self.fade_in_window = torch.sin(
+                np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
+            self.fade_out_window = 1 - self.fade_in_window
+            self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
+        else:
+            self.sola_search_frame = 0
+            self.last_delay_frame = 0
+            self.fade_in_window = 0
+            self.fade_out_window = 1
+            self.sola_buffer = None
+        # self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
+        # self.fade_in_window = torch.sin(
+        #     np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
+        # self.fade_out_window = 1 - self.fade_in_window
         self.start_stream()
 
     def start_stream(self):
@@ -461,6 +486,7 @@ class GUI:
         '''
         start_time = time.perf_counter()
         # print("\nStarting callback")
+        # self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
         self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
         self.input_wav[-self.block_frame:] = librosa.to_mono(indata.T)
 
@@ -496,15 +522,25 @@ class GUI:
             _audio = self.resample_kernel[key_str](_audio)
         temp_wav = _audio[
                    - self.block_frame - self.crossfade_frame - self.sola_search_frame - self.last_delay_frame: - self.last_delay_frame]
-
-        # sola shift
-        conv_input = temp_wav[None, None, : self.crossfade_frame + self.sola_search_frame]
-        cor_nom = F.conv1d(conv_input, self.sola_buffer[None, None, :])
-        cor_den = torch.sqrt(
-            F.conv1d(conv_input ** 2, torch.ones(1, 1, self.crossfade_frame, device=self.device)) + 1e-8)
-        sola_shift = torch.argmax(cor_nom[0, 0] / cor_den[0, 0])
-        temp_wav = temp_wav[sola_shift: sola_shift + self.block_frame + self.crossfade_frame]
-        print(f'\rsola_shift: {int(sola_shift):4}', end="")
+        # temp_wav = _audio[:self.block_frame + self.crossfade_frame + self.sola_search_frame]
+        # temp_wav = _audio[self.input_wav.shape[0] - self.block_frame - self.crossfade_frame - self.sola_search_frame:]
+        
+        # print(_audio.shape, temp_wav.shape, outdata.shape, self.crossfade_frame)
+        
+        if self.sola_buffer is not None:
+            # sola shift
+            # if False:
+            conv_input = temp_wav[None, None, : self.crossfade_frame + self.sola_search_frame]
+            cor_nom = F.conv1d(conv_input, self.sola_buffer[None, None, :])
+            cor_den = torch.sqrt(
+                F.conv1d(conv_input ** 2, torch.ones(1, 1, self.crossfade_frame, device=self.device)) + 1e-8)
+            sola_shift = torch.argmax(cor_nom[0, 0] / cor_den[0, 0])
+            # else:
+            #     sola_shift = 0
+            temp_wav = temp_wav[sola_shift: sola_shift + self.block_frame + self.crossfade_frame]
+            print(f'\rsola_shift: {int(sola_shift):4}', end="")
+        else:
+            print(f'\rsola_shift: {0:4}', end="")
 
         # phase vocoder
         if self.config.use_phase_vocoder:
@@ -513,13 +549,16 @@ class GUI:
                 temp_wav[: self.crossfade_frame],
                 self.fade_out_window,
                 self.fade_in_window)
-        else:
+        elif self.crossfade_frame > 0:
             temp_wav[: self.crossfade_frame] *= self.fade_in_window
             temp_wav[: self.crossfade_frame] += self.sola_buffer * self.fade_out_window
+        
+        if self.crossfade_frame > 0:
+            self.sola_buffer = temp_wav[- self.crossfade_frame:]
 
-        self.sola_buffer = temp_wav[- self.crossfade_frame:]
-
-        outdata[:] = temp_wav[: - self.crossfade_frame, None].repeat(1, 2).cpu().numpy()
+            outdata[:] = temp_wav[: - self.crossfade_frame, None].repeat(1, 2).cpu().numpy()
+        else:
+            outdata[:] = _audio[: self.block_frame, None].repeat(1, 2).cpu().numpy()
         end_time = time.perf_counter()
         print(f' infer_time: {end_time - start_time:.5f}', end="")
         if flag_vc:
@@ -668,23 +707,38 @@ def parse_args(args=None, namespace=None):
         default=-45,
         help="response threhold (dB) | default: -45",
     )
+    # parser.add_argument(
+    #     "-bt",
+    #     "--block_time",
+    #     type=float,
+    #     default=0.3,
+    # )
     parser.add_argument(
-        "-bt",
-        "--block_time",
-        type=float,
-        default=0.3,
+        "-bf",
+        "--block_frame",
+        type=int,
+        default=64,
     )
+    # parser.add_argument(
+    #     "-ct",
+    #     "--crossfade_time",
+    #     type=float,
+    #     # default=0.04,
+    #     default=0.,
+    # )
     parser.add_argument(
-        "-ct",
-        "--crossfade_time",
-        type=float,
-        default=0.04,
+        "-cf",
+        "--crossfade_frame",
+        type=int,
+        # default=0.04,
+        default=16,
     )
     parser.add_argument(
         "-et",
         "--extra_time",
         type=float,
-        default=1.5,
+        # default=1.5,
+        default=0.,
     )
     parser.add_argument(
        "-pb" ,
@@ -723,30 +777,42 @@ class OfflineRenderer(GUI):
         self.config.f_intonation = cmd.intonation
         self.config.f_intonation_base = cmd.intonation_base
         self.config.samplerate = sr
-        self.config.block_time = cmd.block_time
-        self.config.crossfade_time = cmd.crossfade_time
+        # self.config.block_time = cmd.block_time
+        
         self.config.extra_time = cmd.extra_time
         self.config.select_pitch_extractor = cmd.pitch_extractor
         self.config.use_phase_vocoder = cmd.phase_vocoder
         self.config.use_spk_mix = cmd.spk_mix_dict != "None"
         self.config.spk_mix_dict = eval("{" + cmd.spk_mix_dict.replace('，', ',').replace('：', ':') + "}")
-        self.block_frame = int(self.config.block_time * self.config.samplerate)
-        self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate)
+        
         self.sola_search_frame = int(0.01 * self.config.samplerate)
         self.last_delay_frame = int(0.02 * self.config.samplerate)
         self.extra_frame = int(self.config.extra_time * self.config.samplerate)
+        
+        self.device = self.svc_model.update_model(self.config.checkpoint_path)
+        self.config.block_time = cmd.block_frame*self.svc_model.args.data.block_size / self.config.samplerate
+        self.block_frame = int(self.config.block_time * self.config.samplerate + 0.5)
+        
+        self.config.crossfade_time = cmd.crossfade_frame * self.svc_model.args.data.block_size / self.config.samplerate
+        self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate + 0.5)
         self.input_frame = max(
             self.block_frame + self.crossfade_frame + self.sola_search_frame + 2 * self.last_delay_frame,
             self.block_frame + self.extra_frame)
-        self.f_safe_prefix_pad_length = self.config.extra_time - self.config.crossfade_time - 0.01 - 0.02
         
-        self.device = self.svc_model.update_model(self.config.checkpoint_path)
+        self.f_safe_prefix_pad_length = self.config.extra_time - self.config.crossfade_time - 0.01 - 0.02
         self.svc_model.update_pitch_extractor(self.config.select_pitch_extractor, self.config.samplerate)
         self.input_wav = np.zeros(self.input_frame, dtype='float32')
-        self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
-        self.fade_in_window = torch.sin(
-            np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
-        self.fade_out_window = 1 - self.fade_in_window
+        if self.crossfade_frame > 0:
+            self.fade_in_window = torch.sin(
+                np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
+            self.fade_out_window = 1 - self.fade_in_window
+            self.sola_buffer = torch.zeros(self.crossfade_frame, device=self.device)
+        else:
+            self.sola_search_frame = 0
+            self.last_delay_frame = 0
+        # self.fade_in_window = torch.sin(
+        #     np.pi * torch.arange(0, 1, 1 / self.crossfade_frame, device=self.device) / 2) ** 2
+        # self.fade_out_window = 1 - self.fade_in_window
         
     def render(self, indata: np.ndarray, outdata: np.ndarray):
         super().audio_callback(indata, outdata, 0, 0, None)
@@ -764,7 +830,9 @@ if __name__ == "__main__":
         info = sf.info(cmd.input)
         renderer = OfflineRenderer(cmd, info.samplerate)
         
-        blocksize = int(cmd.block_time * info.samplerate)
+        # blocksize = int(cmd.block_time * info.samplerate)
+        blocksize = int(renderer.block_frame)
+        print(f"blocksize: {blocksize}")
         buffer_frames = int(info.frames//blocksize + 1) * blocksize
         result = np.zeros((1, buffer_frames, 2), dtype=np.float64)
         for idx, block in enumerate(sf.blocks(cmd.input, blocksize=blocksize, fill_value=0.0)):

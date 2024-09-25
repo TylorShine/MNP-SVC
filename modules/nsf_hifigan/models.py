@@ -7,6 +7,9 @@ import torch.nn.functional as F
 from torch.nn import AvgPool1d, Conv1d, Conv2d, ConvTranspose1d
 from torch.nn.utils import remove_weight_norm, spectral_norm, weight_norm
 
+from modules.bigvgan.activations import SnakeBeta
+from modules.bigvgan.alias_free_activation import Activation1d
+
 LRELU_SLOPE = 0.1
 
 
@@ -182,6 +185,173 @@ class ResBlock1c(torch.nn.Module):
         for l in self.convs1:
             remove_weight_norm(l)
         for l in self.convs2:
+            remove_weight_norm(l)
+            
+            
+class ResBlock3g(torch.nn.Module):
+    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3)):
+        super(ResBlock3g, self).__init__()
+        self.h = h
+        # self.convs1 = nn.ModuleList([
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+        #                        padding=get_padding(kernel_size, dilation[0]))),
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+        #                        padding=get_padding(kernel_size, dilation[1])))
+        # ])
+        self.convs1_1 = nn.ModuleList([
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                               padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                               padding=get_padding(kernel_size, dilation[1])))
+        ])
+        self.convs1_2 = nn.ModuleList([
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                               padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                               padding=get_padding(kernel_size, dilation[1])))
+        ])
+        # self.convs2_1 = nn.ModuleList([
+        #     nn.CELU(),
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+        #                        padding=get_padding(kernel_size, dilation[0]))),
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+        #                        padding=get_padding(kernel_size, dilation[1]))),
+        #     # nn.CELU(),
+        # ])
+        # self.convs2_2 = nn.ModuleList([
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+        #                        padding=get_padding(kernel_size, dilation[0]))),
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+        #                        padding=get_padding(kernel_size, dilation[1])))
+        # ])
+        # self.convs2 = nn.ModuleList([
+        #     weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+        #                        padding=get_padding(kernel_size, dilation[0]))),
+        #     weight_norm(Conv1d(channels, channels*2, kernel_size, 1, dilation=dilation[1],
+        #                        padding=get_padding(kernel_size, dilation[1])))
+        # ])
+        self.convs2 = nn.ModuleList([
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                               padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                               padding=get_padding(kernel_size, dilation[1])))
+        ])
+        # self.convs1.apply(init_weights)
+        self.convs1_1.apply(init_weights)
+        self.convs1_2.apply(init_weights)
+        # self.convs2_1.apply(init_weights)
+        # self.convs2_2.apply(init_weights)
+        self.convs2.apply(init_weights)
+        
+        # self.activations1_1 = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs1_1))])
+        # self.activations1_2 = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs1_2))])
+
+    def forward(self, x):
+        # for c1, c2, c3 in zip(self.convs1, self.convs2_1, self.convs2_2):
+        # for c1_1, c1_2, c2_1, c2_2 in zip(self.convs1_1, self.convs1_2, self.convs2_1, self.convs2_2):
+        # for c1_1, c1_2, c2, a1_1, a1_2 in zip(self.convs1_1, self.convs1_2, self.convs2, self.activations1_1, self.activations1_2):
+        for c1_1, c1_2, c2 in zip(self.convs1_1, self.convs1_2, self.convs2):
+            # xc = F.celu(x)
+            # xc = c1(xc)
+            # xc = x.view(x.shape[0], 2, x.shape[1], -1)
+            # xa = a1_1(x)
+            xa = F.celu(x)
+            xa = c2(c1_1(xa) * F.celu(c1_2(xa)))
+            # xb = c2_2()
+            # xa = c1_1(xc[:,:,0,:])
+            # xb = c1_2(xc[:,:,1,:])
+            # xc = xc.view(xc.shape[0], xc.shape[1], 2, -1)
+            # xc = xc.view(xc.shape[0], xc.shape[1]//2, 2, -1)
+            # xa = c2(xc[:,:,0,:])
+            # xb = c3(xc[:,:,1,:])
+            # xc = xc.view(xc.shape[0], 2, xc.shape[1]//2, -1)
+            # xa = c2(xc[:,0,:,:])
+            # xb = c3(xc[:,1,:,:])
+            # x = torch.cat([xa, xb], dim=-1) + x
+            x = xa + x
+            
+        return x
+
+    def remove_weight_norm(self):
+        for l in self.convs1_1:
+            remove_weight_norm(l)
+        for l in self.convs1_2:
+            remove_weight_norm(l)
+        for l in self.convs2:
+            remove_weight_norm(l)
+            
+            
+class ResBlock3gs(torch.nn.Module):
+    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3)):
+        super(ResBlock3gs, self).__init__()
+        self.h = h
+        self.convs = nn.ModuleList([
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                               padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                               padding=get_padding(kernel_size, dilation[1])))
+        ])
+        self.convs.apply(init_weights)
+        
+        # self.activations = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs))])
+        self.activations = nn.ModuleList([
+            Activation1d(activation=nn.CELU()) for _ in range(len(self.convs))])
+        # self.activations1_2 = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs1_2))])
+
+    def forward(self, x):
+        for c, a in zip(self.convs, self.activations):
+            xa = a(x)
+            xa = c(xa)
+            x = xa + x
+            
+        return x
+
+    def remove_weight_norm(self):
+        for l in self.convs:
+            remove_weight_norm(l)
+            
+            
+class ResBlock3s(torch.nn.Module):
+    def __init__(self, h, channels, kernel_size=3, dilation=(1, 3)):
+        super(ResBlock3s, self).__init__()
+        self.h = h
+        self.convs = nn.ModuleList([
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[0],
+                               padding=get_padding(kernel_size, dilation[0]))),
+            weight_norm(Conv1d(channels, channels, kernel_size, 1, dilation=dilation[1],
+                               padding=get_padding(kernel_size, dilation[1])))
+        ])
+        self.convs.apply(init_weights)
+        
+        # self.activations = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs))])
+        # self.activations = nn.ModuleList([
+        #     Activation1d(activation=nn.CELU()) for _ in range(len(self.convs))])
+        self.activations = nn.ModuleList([
+            SnakeBeta(channels, alpha_logscale=True) for _ in range(len(self.convs))])
+        # self.activations1_2 = nn.ModuleList([
+        #     Activation1d(activation=SnakeBeta(
+        #         channels, alpha_logscale=True)) for _ in range(len(self.convs1_2))])
+
+    def forward(self, x):
+        for c, a in zip(self.convs, self.activations):
+            xa = a(x)
+            xa = c(xa)
+            x = xa + x
+            
+        return x
+
+    def remove_weight_norm(self):
+        for l in self.convs:
             remove_weight_norm(l)
 
 
@@ -406,6 +576,9 @@ class GeneratorDirectSource(torch.nn.Module):
             '2': ResBlock2,
             '3': ResBlock3,
             '1c': ResBlock1c,
+            '3g': ResBlock3g,
+            '3gs': ResBlock3gs,
+            '3s': ResBlock3s,
         }
         resblock = resblocks[h.resblock]
 
@@ -427,6 +600,12 @@ class GeneratorDirectSource(torch.nn.Module):
             ch //= 2
             for j, (k, d) in enumerate(zip(h.resblock_kernel_sizes, h.resblock_dilation_sizes)):
                 self.resblocks.append(resblock(h, ch, k, d))
+                
+        # # self.activation_post = Activation1d(
+        # #     # activation=SnakeBeta(ch, alpha_logscale=True)
+        # #     activation=nn.CELU()
+        # # )
+        # self.activation_post = SnakeBeta(ch, alpha_logscale=True)
 
         self.conv_post = weight_norm(Conv1d(ch, 1, 7, 1, padding=3))
         self.ups.apply(init_weights)
@@ -449,8 +628,10 @@ class GeneratorDirectSource(torch.nn.Module):
                     xs += self.resblocks[i * self.num_kernels + j](x)
             x = xs / self.num_kernels
         x = F.leaky_relu(x)
+        # x = self.activation_post(x)
         x = self.conv_post(x)
         x = torch.tanh(x)
+        # x = torch.clamp(x, min=-1., max=1.)
 
         return x
 

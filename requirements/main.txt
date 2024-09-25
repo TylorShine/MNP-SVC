@@ -26,3 +26,5 @@ freesimplegui
 sounddevice
 gradio
 pyannote.audio
+accelerate
+huggingface_hub[torch]

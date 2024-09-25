@@ -57,8 +57,10 @@ def load_model(
             ckpt = torch.load(path_pt, map_location=torch.device(device), weights_only=True)
             global_step = ckpt['global_step']
             states = ckpt.get('states')
+            model.to(device)
             model.load_state_dict(ckpt['model'], strict=False)
             if ckpt.get('optimizer') != None:
+                # optimizer.load_state_dict(ckpt['optimizer'])
                 optimizer.load_state_dict(ckpt['optimizer'])
     return global_step, model, optimizer, states
 

@@ -12,6 +12,8 @@ from modules.loss import discriminator_loss, feature_loss, generator_loss
 from modules.logger.saver import Saver
 from modules.logger import utils
 
+from accelerate import Accelerator
+
 def test(args, model, loss_func, loader_test, saver, vocoder=None):
     model.eval()
 
@@ -30,6 +32,8 @@ def test(args, model, loss_func, loader_test, saver, vocoder=None):
     with torch.no_grad():
         with tqdm(loader_test, desc="test") as pbar:
             for data in pbar:
+                if data is None:
+                    break
                 fn = data['name'][0].lstrip("data/test/")
 
                 # unpack data
@@ -94,7 +98,10 @@ def test(args, model, loss_func, loader_test, saver, vocoder=None):
                 pbar.set_postfix({'loss': loss.item(), 'RTF': rtf})
             
     # report
-    test_loss /= num_batches
+    if num_batches > 0:
+        test_loss /= num_batches
+    else:
+        return None
     
     return test_loss
 
@@ -102,8 +109,44 @@ def test(args, model, loss_func, loader_test, saver, vocoder=None):
 def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     model, optimizer, scheduler, loss_func, vocoder = nets_g
     model_d, optimizer_d, scheduler_d = nets_d
+    
     # saver
     saver = Saver(args, initial_global_step=initial_global_step)
+    
+    accelerator: Accelerator = saver.accelerator
+    
+    # accelerator = Accelerator(
+    #     mixed_precision=args.train.accelerator.mixed_precision,
+    #     log_with=args.train.accelerator.log,
+    # )
+    
+    accelerator.init_trackers(
+        project_name=args.env.project_name)
+    
+    model, optimizer, scheduler, model_d, optimizer_d, scheduler_d, loss_func, loader_train, loader_test = accelerator.prepare(
+        model, optimizer, scheduler,
+        model_d, optimizer_d, scheduler_d,
+        loss_func,
+        loader_train, loader_test
+    )
+    
+    # accelerator.register_for_checkpointing(scheduler)
+    
+    # initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
+    
+    state_loaded = saver.load_state()
+    if not state_loaded:
+        state_loaded = saver.load_from_pretrained(
+            model, optimizer)
+        if not state_loaded:
+            print(f"No state found at {args.env.expdir} and no pretrained found at {args.env.pretrained}, starting from scratch")
+    
+    # device = args.device
+    device = accelerator.device
+    
+    model.to(device)
+    if model_d is not None:
+        model_d.to(device)
     
     last_model_save_step = saver.global_step
     
@@ -112,7 +155,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     model.train()
     if model_d is not None:
         model_d.train()
-    scaler = GradScaler()
+    # scaler = GradScaler()
     if args.train.amp_dtype == 'fp32':
         dtype = torch.float32
     elif args.train.amp_dtype == 'fp16':
@@ -153,7 +196,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # unpack data
                 for k in data.keys():
                     if k != 'name':
-                        data[k] = data[k].to(args.device)
+                        data[k] = data[k].to(device)
                         
                 stack_input = data['units']
                 units = stack_input
@@ -162,7 +205,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 if dtype == torch.float32:
                     signal = model(stack_input.float())
                 else:
-                    with autocast(device_type=args.device, dtype=dtype):
+                    with autocast(device_type=device, dtype=dtype):
                         signal = model(stack_input.to(dtype))
                 
                 optimizer.zero_grad()
@@ -249,7 +292,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                                     (F.cosine_similarity(units.float()[b, f], sim_mini_opps_centroid, dim=0)*0.5 + 0.5)*args.train.low_similar_loss_variation)
                             )
                         else:
-                            with autocast(device_type=args.device, dtype=dtype):
+                            with autocast(device_type=device, dtype=dtype):
                                 losses.append(
                                     F.l1_loss(
                                         1. - (F.cosine_similarity(signal[b, f], signal[opps[sim_maxi_opp], sim_maxi_opp_frame], dim=0)*0.5 + 0.5),
@@ -277,13 +320,13 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     raise ValueError(' [x] nan loss ')
                 
                 # backpropagate
-                if dtype == torch.float32:
-                    loss.backward()
-                    optimizer.step()
-                else:
-                    scaler.scale(loss).backward()
-                    scaler.step(optimizer)
-                    scaler.update()
+                # if dtype == torch.float32:
+                loss.backward()
+                optimizer.step()
+                # else:
+                #     scaler.scale(loss).backward()
+                #     scaler.step(optimizer)
+                #     scaler.update()
                     
                 # log loss
                 if saver.global_step % args.train.interval_log == 0:
@@ -323,11 +366,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 scheduler.step()
         return
     else:   # args.train.only_u2c_stack
-        # freeze against last fc of stack
-        for param_name, param in model.named_parameters():
-            if param_name.startswith(f'{ddsp_model_prefix}unit2ctrl.stack.0.') or \
-                param_name.startswith(f'{ddsp_model_prefix}unit2ctrl.stack.1.'):
-                param.requires_grad = False
+        if not args.data.encoder == "phrex":
+            # freeze against last fc of stack
+            for param_name, param in model.named_parameters():
+                if param_name.startswith(f'{ddsp_model_prefix}unit2ctrl.stack.0.') or \
+                    param_name.startswith(f'{ddsp_model_prefix}unit2ctrl.stack.1.'):
+                    param.requires_grad = False
     
     freeze_model = False
     if freeze_model:
@@ -392,7 +436,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             # unpack data
             for k in data.keys():
                 if k != 'name':
-                    data[k] = data[k].to(args.device)
+                    data[k] = data[k].to(device)
             
             
             units = data['units']
@@ -405,49 +449,53 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             if "Diffusion" in args.model.type:
                 mel = data['mel']
                 # forward
-                if dtype == torch.float32:
-                    ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
+                # if dtype == torch.float32:
+                #     ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
+                #                 vocoder=vocoder, gt_spec=mel.float(), infer=False, k_step=args.model.k_step_max)
+                #                                 # aug_shift=data['aug_shift'], infer=False)
+                # else:
+                #     # with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
+                    ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
                                 vocoder=vocoder, gt_spec=mel.float(), infer=False, k_step=args.model.k_step_max)
-                                                # aug_shift=data['aug_shift'], infer=False)
-                else:
-                    with autocast(device_type=args.device, dtype=dtype):
-                        ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
-                                    vocoder=vocoder, gt_spec=mel.float(), infer=False, k_step=args.model.k_step_max)
                         
             elif "ReflowDirect" in args.model.type:
                 mel = data['mel']
                 # forward
-                if dtype == torch.float32:
-                    ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
-                                vocoder=vocoder, gt_wav=audio.float(), gt_spec=mel, infer=False, loss_func=loss_func, t_start=args.model.t_start)
-                                                # aug_shift=data['aug_shift'], infer=False)
-                else:
-                    with autocast(device_type=args.device, dtype=dtype):
-                        ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
-                                    vocoder=vocoder, gt_wav=audio.to(dtype), gt_spec=mel, infer=False, loss_func=loss_func, t_start=args.model.t_start)
+                # if dtype == torch.float32:
+                #     ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
+                #                 vocoder=vocoder, gt_wav=audio.float(), gt_spec=mel, infer=False, loss_func=loss_func, t_start=args.model.t_start)
+                #                                 # aug_shift=data['aug_shift'], infer=False)
+                # else:
+                    # with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
+                    ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
+                                vocoder=vocoder, gt_wav=audio.to(dtype), gt_spec=mel, infer=False, loss_func=loss_func, t_start=args.model.t_start)
                         
             elif "Reflow" in args.model.type:
                 mel = data['mel']
                 # forward
-                if dtype == torch.float32:
-                    ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
+                # if dtype == torch.float32:
+                #     ddsp_loss, diff_loss = model(units.float(), f0, volume, data[spk_id_key], 
+                #                 vocoder=vocoder, gt_spec=mel.float(), infer=False, t_start=args.model.t_start)
+                #                                 # aug_shift=data['aug_shift'], infer=False)
+                # else:
+                #     with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
+                    ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
                                 vocoder=vocoder, gt_spec=mel.float(), infer=False, t_start=args.model.t_start)
-                                                # aug_shift=data['aug_shift'], infer=False)
-                else:
-                    with autocast(device_type=args.device, dtype=dtype):
-                        ddsp_loss, diff_loss=model(units.to(dtype), f0, volume, data[spk_id_key], 
-                                    vocoder=vocoder, gt_spec=mel.float(), infer=False, t_start=args.model.t_start)
             else:    
                 # forward
-                if dtype == torch.float32:
-                    signal = model(units.float(), f0, volume, data[spk_id_key],
+                # if dtype == torch.float32:
+                #     signal = model(units.float(), f0, volume, data[spk_id_key],
+                #                                 infer=False)
+                #                                 # aug_shift=data['aug_shift'], infer=False)
+                # else:
+                #     with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
+                    signal = model(units.to(dtype), f0, volume, data[spk_id_key],
                                                 infer=False)
-                                                # aug_shift=data['aug_shift'], infer=False)
-                else:
-                    with autocast(device_type=args.device, dtype=dtype):
-                        signal = model(units.to(dtype), f0, volume, data[spk_id_key],
-                                                    infer=False)
-                                                # aug_shift=data['aug_shift'], infer=False)
+                                            # aug_shift=data['aug_shift'], infer=False)
                                             
             # optimizer_d.zero_grad()
             
@@ -457,7 +505,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             if model_d is not None:
                 optimizer_d.zero_grad()
                 # torch.compiler.cudagraph_mark_step_begin()
-                with autocast(device_type=args.device, dtype=dtype):
+                # with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
                     d_signal_real, d_signal_gen, _, _ = model_d(audio.unsqueeze(1), signal.detach().unsqueeze(1), flg_train=True)
                     
                 # discriminator loss
@@ -467,21 +516,25 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 if torch.isnan(loss_d):
                     raise ValueError(' [x] discriminator: nan loss ')
                 else:
-                    # backpropagate
-                    if dtype == torch.float32:
-                        loss_d.backward()
-                        torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
-                        optimizer_d.step()
-                    else:
-                        scaler.scale(loss_d).backward()
-                        scaler.unscale_(optimizer_d)
-                        torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
-                        scaler.step(optimizer_d)
-                
+                    # # backpropagate
+                    # if dtype == torch.float32:
+                    #     loss_d.backward()
+                    #     torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
+                    #     optimizer_d.step()
+                    # else:
+                    #     scaler.scale(loss_d).backward()
+                    #     scaler.unscale_(optimizer_d)
+                    #     torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
+                    #     scaler.step(optimizer_d)
+                    accelerator.backward(loss_d)
+                    if accelerator.sync_gradients:
+                        accelerator.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
+                    optimizer_d.step()
                 optimizer.zero_grad()
                 
                 # generator loss
-                with autocast(device_type=args.device, dtype=dtype):
+                # with autocast(device_type=args.device, dtype=dtype):
+                with accelerator.autocast():
                     d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio.unsqueeze(1), signal.unsqueeze(1))
                     
                 loss_fm = feature_loss(fmap_real, fmap_gen)
@@ -512,19 +565,23 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 if torch.isnan(loss):
                     raise ValueError(' [x] nan loss ')
                 else:
-                    # backpropagate
-                    if dtype == torch.float32:
-                        loss.backward()
-                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
-                        optimizer.step()
-                    else:
-                        scaler.scale(loss).backward()
-                        scaler.unscale_(optimizer)
-                        torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
-                        scaler.step(optimizer)
-                        scaler.update()
-            elif model_d is not None and dtype != torch.float32:
-                scaler.update()
+                    # # backpropagate
+                    # if dtype == torch.float32:
+                    #     loss.backward()
+                    #     torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
+                    #     optimizer.step()
+                    # else:
+                    #     scaler.scale(loss).backward()
+                    #     scaler.unscale_(optimizer)
+                    #     torch.nn.utils.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
+                    #     scaler.step(optimizer)
+                    #     scaler.update()
+                    accelerator.backward(loss)
+                    if accelerator.sync_gradients:
+                        accelerator.clip_grad_norm_(parameters=model.parameters(), max_norm=500)
+                    optimizer.step()
+            # elif model_d is not None and dtype != torch.float32:
+            #     scaler.update()
 
 
 
@@ -545,70 +602,89 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     end="",
                 )
                 
+                # log_dict = {
+                #     'train/g/loss': loss.item(),
+                #     'train/g/lr': scheduler.get_last_lr()[0],
+                # }
+                
                 log_dict = {
-                    'train/g/loss': loss.item(),
-                    'train/g/lr': scheduler.get_last_lr()[0],
+                    "train/generator/loss": loss.item(),
+                    "train/generator/learning_rate": scheduler.get_last_lr()[0],
+                    "train/batch_time": args.train.interval_log/saver.get_interval_time(),
+                    "train/epoch": epoch,
+                    "train/step": saver.global_step,
                 }
                 
                 if model_d is not None:
                     log_dict.update({
-                        'train/d/loss': loss_d.item(),
-                        'train/d/lr': scheduler_d.get_last_lr()[0],
+                        'train/discriminator/loss': loss_d.item(),
+                        'train/discriminator/learning_rate': scheduler_d.get_last_lr()[0],
                     })
                     log_dict.update({
-                        f'train/d_r/{i}': v for i, v in enumerate(losses_d_real)
+                        f'train/discriminator_real/l{i}': v for i, v in enumerate(losses_d_real)
                     })
                     log_dict.update({
-                        f'train/d_g/{i}': v for i, v in enumerate(losses_d_gen)
+                        f'train/discriminator_gen/l{i}': v for i, v in enumerate(losses_d_gen)
                     })
                     log_dict.update({
-                        f'train/g/{i}': v for i, v in enumerate(losses_gen)
+                        f'train/generator/l{i}': v for i, v in enumerate(losses_gen)
                     })
                     log_dict.update({
-                        f'train/g/fm': loss_fm.item()
+                        f'train/generator/feature_matching': loss_fm.item()
                     })
                 
                 saver.log_value(log_dict)
             
             # validation
-            if saver.global_step % args.train.interval_val == 0:
-                optimizer_save = optimizer if args.train.save_opt else None
+            if accelerator.is_main_process and saver.global_step % args.train.interval_val == 0:
+                # optimizer_save = optimizer if args.train.save_opt else None
                 
-                states = {
-                    'scheduler': scheduler.state_dict(),
-                    'last_lr': scheduler.get_last_lr(),
-                }
+                # states = {
+                #     'scheduler': scheduler.state_dict(),
+                #     'last_lr': scheduler.get_last_lr(),
+                # }
+                
+                # save states
+                if args.train.save_states:
+                    saver.save_state()
                     
                 # save latest
-                saver.save_model(model, optimizer_save, postfix=f'_{saver.global_step}', states=states)
+                # saver.save_model(model, postfix=f'_{saver.global_step}', states=states)
+                saver.save_model(model, postfix=f'_{saver.global_step}')
                 
                 if model_d is not None:
-                    optimizer_d_save = optimizer_d if args.train.save_opt else None
-                    states_d = {
-                        'scheduler': scheduler_d.state_dict(),
-                        'last_lr': scheduler_d.get_last_lr(),
-                    }
-                    saver.save_model(model_d, optimizer_d_save, postfix=f'D_{saver.global_step}', states=states_d)
+                    # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
+                    # states_d = {
+                    #     'scheduler': scheduler_d.state_dict(),
+                    #     'last_lr': scheduler_d.get_last_lr(),
+                    # }
+
+                    # save latest discriminator
+                    saver.save_model(model_d, postfix=f'D_{saver.global_step}')
+                    # saver.save_model(model_d, optimizer_d_save, postfix=f'D_{saver.global_step}', states=states_d)
                     
-                    if last_model_save_step > 0:
-                        saver.delete_model(postfix=f'D_{last_model_save_step}')
+                    # if last_model_save_step > 0:
+                    #     saver.delete_model(postfix=f'D_{last_model_save_step}')
                         
                 last_model_save_step = saver.global_step
 
                 # run testing set
                 if loader_test is not None:
                     test_loss = test(args, model, loss_func, loader_test, saver, vocoder=vocoder)
-                
-                    # log loss
-                    saver.log_info(
-                        ' --- <validation> loss: {:.3f}. '.format(
-                            test_loss,
+                    
+                    if test_loss is not None:
+                    
+                        # log loss
+                        saver.log_info(
+                            ' --- <validation step:{:d}> loss: {:.3f}. '.format(
+                                saver.global_step,
+                                test_loss,
+                            )
                         )
-                    )
-        
-                    saver.log_value({
-                        'validation/loss': test_loss
-                    })
+            
+                        saver.log_value({
+                            'validation/loss': test_loss
+                        })
                 
                 model.train()
                 
@@ -620,5 +696,60 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
         else:
             scheduler.step()
             scheduler_d.step()
+            
+    # lastly, test, logging and save last states
+    # optimizer_save = optimizer if args.train.save_opt else None
+                
+    # states = {
+    #     'scheduler': scheduler.state_dict(),
+    #     'last_lr': scheduler.get_last_lr(),
+    # }
+    
+    accelerator.wait_for_everyone()
+    
+    if accelerator.is_main_process:
+        if args.train.save_states:
+            saver.save_state()
+            
+        # save latest
+        saver.save_model(model, postfix=f'_{saver.global_step}')
+        
+        if model_d is not None:
+            # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
+            # states_d = {
+            #     'scheduler': scheduler_d.state_dict(),
+            #     'last_lr': scheduler_d.get_last_lr(),
+            # }
+            saver.save_model(model_d, postfix=f'D_{saver.global_step}')
+            
+            if last_model_save_step > 0 and last_model_save_step != saver.global_step:
+                saver.delete_model(postfix=f'D_{last_model_save_step}')
+                
+        last_model_save_step = saver.global_step
+        
+        if loader_test is not None:
+            test_loss = test(args, model, loss_func, loader_test, saver, vocoder=vocoder)
+
+            if test_loss is not None:
+
+                # log loss
+                saver.log_info(
+                    ' --- <validation> ep.{:d} loss: {:.3f}. '.format(
+                        args.train.epochs,
+                        test_loss,
+                    )
+                )
+
+                saver.log_value({
+                    'validation/loss_d': test_loss
+                })
+                
+        # training done
+        print(f'Training completed after {saver.global_step} steps, {args.train.epochs} epochs!')
+        
+        saver.sync()
+        
+    accelerator.end_training()
+    
 
                           
