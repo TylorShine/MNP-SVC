@@ -10,13 +10,13 @@ from modules.solver import train
 from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly, NMPSFHiFi
 from modules.diffusion.vocoder import Unit2WavMinimumNoisedPhase
 from modules.reflow.vocoder import Unit2WavMinimumNoisedPhase as Unit2WavMinimumNoisedPhaseReflow, Unit2WavMinimumNoisedPhaseDirect, Unit2WavMinimumNoisedPhaseHidden
-from modules.discriminator import MultiSpecDiscriminator, MultiPeriodSignalDiscriminator
+from modules.discriminator import MultiSpecDiscriminator, MultiPeriodSignalDiscriminator, MultiScaleSubbandCQTDiscriminator
 from modules.loss import (
     RSSLoss, DSSLoss, DLFSSLoss,
     DLFSSMPLoss, DLFSSMPMalLoss, DSMPMalLoss,
     DLFSSMPMalinblogsLoss, DLFSSMalinblogsLoss, MRLFSSMPMalinblogsLoss, MRSMPMalinblogsLoss,
     MRSMPL1Loss, MRLF4SMPMalinblogsLoss, MRRSMalinblogsLoss,
-    MelLoss
+    MelLoss, MultiScaleMelSpectrogramLoss
 )
 
 
@@ -82,12 +82,13 @@ if __name__ == '__main__':
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
-            torch.set_float32_matmul_precision('high')
+            # torch.set_float32_matmul_precision('high')
             # model.unit2ctrl.compile()
             model.unit2ctrl.compile(mode="reduce-overhead")
             if args.model.use_discriminator:
                 model_d = MultiSpecDiscriminator()
                 # model_d = MultiPeriodSignalDiscriminator()
+                # model_d = MultiScaleSubbandCQTDiscriminator(sampling_rate=args.data.sampling_rate)
                 # model_d.compile(mode="reduce-overhead")
     elif args.model.type == 'DiffusionMinimumNoisedPhase':
         from modules.diffusion.vocoder import Vocoder
@@ -431,6 +432,8 @@ if __name__ == '__main__':
     elif args.loss.use_mel:
         loss_func = MelLoss(n_fft=args.loss.n_fft, n_mels=args.loss.n_mels, 
                             sample_rate=args.data.sampling_rate, device=args.device)
+    elif args.loss.use_multiscale_mel:
+        loss_func = MultiScaleMelSpectrogramLoss(args.data.sampling_rate)
     else:
         loss_func = RSSLoss(args.loss.fft_min, args.loss.fft_max, args.loss.n_scale, device=args.device)
         

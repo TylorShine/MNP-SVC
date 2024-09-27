@@ -2,6 +2,8 @@ import torch
 import torch.nn as nn
 import torchaudio
 from torch.nn import functional as F
+
+from librosa.filters import mel as librosa_mel_fn
         
 class SSSLoss(nn.Module):
     """
@@ -902,6 +904,18 @@ def freq_bartlett_window(window_lengh, freq=1.0):
     window = (1. - torch.abs(2.*(n - 0.5)*freq))*mask
     return window
 
+
+def variable_hann_window(window_lengh, width=1.0):
+    n = torch.linspace(0.0, 1.0, window_lengh)
+    mask = torch.where(n*width + 0.5-width*0.5 < 0.0, 0.0, 1.0)
+    mask = mask * torch.where(n*width + 0.5-width*0.5 > 1.0, 0.0, 1.0)
+    window = (0.5 + 0.5*torch.cos(2.*torch.pi*(n - 0.5)*width))*mask
+    return window
+
+
+def angle_loss(y_true, y_pred):
+    return F.l1_loss(torch.cos(y_true) + torch.sin(y_true), torch.cos(y_pred) + torch.sin(y_pred))
+
         
 class MRSMPMalinblogsLoss(nn.Module):
     '''
@@ -1522,6 +1536,248 @@ class MelLoss(nn.Module):
         # Calculate loss
         mel_loss = F.l1_loss(mel_pred, mel_true)
         return mel_loss
+    
+    
+# Adapted from https://github.com/descriptinc/descript-audio-codec/blob/main/dac/nn/loss.py under the MIT license.
+class MultiScaleMelSpectrogramLoss(nn.Module):
+    """Compute distance between mel spectrograms. Can be used
+    in a multi-scale way.
+
+    Parameters
+    ----------
+    n_mels : List[int]
+        Number of mels per STFT, by default [5, 10, 20, 40, 80, 160, 320],
+    window_lengths : List[int], optional
+        Length of each window of each STFT, by default [32, 64, 128, 256, 512, 1024, 2048]
+    loss_fn : typing.Callable, optional
+        How to compare each loss, by default nn.L1Loss()
+    clamp_eps : float, optional
+        Clamp on the log magnitude, below, by default 1e-5
+    mag_weight : float, optional
+        Weight of raw magnitude portion of loss, by default 0.0 (no ampliciation on mag part)
+    log_weight : float, optional
+        Weight of log magnitude portion of loss, by default 1.0
+    pow : float, optional
+        Power to raise magnitude to before taking log, by default 1.0
+    weight : float, optional
+        Weight of this loss, by default 1.0
+    match_stride : bool, optional
+        Whether to match the stride of convolutional layers, by default False
+
+    Implementation copied from: https://github.com/descriptinc/lyrebird-audiotools/blob/961786aa1a9d628cca0c0486e5885a457fe70c1a/audiotools/metrics/spectral.py
+    Additional code copied and modified from https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
+    """
+
+    def __init__(
+        self,
+        sampling_rate: int,
+        n_mels: list[int] = [5, 10, 20, 40, 80, 160, 320],
+        # n_mels: list[int] = [5, 10, 40, 320],
+        window_lengths: list[int] = [32, 64, 128, 256, 512, 1024, 2048],
+        # window_lengths: list[int] = [128, 128, 256, 512, 2048],
+        loss_fn: callable = nn.L1Loss(),
+        # loss_fn: callable = nn.MSELoss(),
+        angle_loss_fn: callable = angle_loss,
+        clamp_eps: float = 1e-5,
+        # mag_weight: float = 0.0,
+        # log_weight: float = 1.0,
+        mag_weight: float = 1.0,
+        log_weight: float = 0.0,
+        pow: float = 1.0,
+        weight: float = 1.0,
+        match_stride: bool = False,
+        mel_fmin: list[float] = [0, 0, 0, 0, 0, 0, 0],
+        mel_fmax: list[float] = [None, None, None, None, None, None, None],
+        window_fn: callable = torch.hann_window,
+        window_widths: list[float] | None = None,
+        # window_fn: callable = variable_hann_window,
+        # window_widths: list[float] | None = [1/8, 1/4, 1/2, 1., 1.],
+        # phase_loss_amounts: list[float] = [0.008, 0.004, 0.002, 0.001, 0.0005, 0.00025, 0.000125],
+        phase_loss_amounts: list[float] = [0., 0., 0., 0., 0., 0., 0.],
+    ):
+        super().__init__()
+        self.sampling_rate = sampling_rate
+
+        # STFTParams = namedtuple(
+        #     "STFTParams",
+        #     ["window_length", "hop_length", "window_type", "match_stride"],
+        # )
+        
+        if window_widths is not None:
+            self.stft_params = [
+                {
+                    "window_length": w,
+                    "hop_length": int(w // 4 * ww),
+                    "match_stride": match_stride,
+                    "phase_loss_amount": p,
+                    "window": window_fn(w, width=ww),
+                    # "window_fn": window_fn,
+                    # "win_kwargs": {"width": ww},
+                }
+                for w, ww, p in zip(window_lengths, window_widths, phase_loss_amounts)
+            ]
+        else:
+            self.stft_params = [
+                {
+                    "window_length": w,
+                    "hop_length": w // 4,
+                    "match_stride": match_stride,
+                    "phase_loss_amount": p,
+                    "window": window_fn(w),
+                    # "window_fn": window_fn,
+                }
+                for w, p in zip(window_lengths, phase_loss_amounts)
+            ]
+        
+        self.n_mels = n_mels
+        self.loss_fn = loss_fn
+        self.angle_loss_fn = angle_loss_fn
+        self.clamp_eps = clamp_eps
+        self.log_weight = log_weight
+        self.mag_weight = mag_weight
+        self.weight = weight
+        self.mel_fmin = mel_fmin
+        self.mel_fmax = mel_fmax
+        self.pow = pow
+
+    # @staticmethod
+    # def get_window(
+    #     window_type,
+    #     window_length,
+    # ):
+    #     return signal.get_window(window_type, window_length)
+
+    @staticmethod
+    def get_mel_filters(sr, n_fft, n_mels, fmin, fmax):
+        return librosa_mel_fn(sr=sr, n_fft=n_fft, n_mels=n_mels, fmin=fmin, fmax=fmax)
+
+    def mel_spectrogram(
+        self,
+        wav,
+        n_mels,
+        fmin,
+        fmax,
+        window_length,
+        hop_length,
+        match_stride,
+        window,
+        phase_loss_amount,
+        # window_fn=torch.hann_window,
+        # win_kwargs=None,
+    ):
+        """
+        Mirrors AudioSignal.mel_spectrogram used by BigVGAN-v2 training from: 
+        https://github.com/descriptinc/audiotools/blob/master/audiotools/core/audio_signal.py
+        """
+        wav = wav[:, None, :]
+        B, C, T = wav.shape
+
+        if match_stride:
+            assert (
+                hop_length == window_length // 4
+            ), "For match_stride, hop must equal n_fft // 4"
+            right_pad = int(T / hop_length + 1.) * hop_length - T
+            pad = (window_length - hop_length) // 2
+        else:
+            right_pad = 0
+            pad = 0
+
+        wav = torch.nn.functional.pad(wav, (pad, pad + right_pad), mode="constant")
+
+        # window = self.get_window(window_type, window_length)
+        # window = torch.from_numpy(window).to(wav.device).float()
+        
+        window = window.to(wav.device).float()
+        
+        # mel_spectrogram = torchaudio.transforms.MelSpectrogram(
+        #     sample_rate=self.sampling_rate,
+        #     n_fft=window_length,
+        #     win_length=window_length,
+        #     hop_length=hop_length,
+        #     f_min=fmin,
+        #     f_max=fmax,
+        #     n_mels=n_mels,
+        #     window_fn=window_fn,
+        #     power=1,
+        #     wkwargs=win_kwargs,
+        #     center=True,
+        #     pad_mode="constant",
+        #     mel_scale="slaney",
+        # )
+
+        stft = torch.stft(
+            wav.reshape(-1, T),
+            n_fft=window_length,
+            hop_length=hop_length,
+            window=window,
+            center=True,
+            pad_mode="constant",
+            return_complex=True,
+        )
+        _, nf, nt = stft.shape
+        stft = stft.reshape(B, C, nf, nt)
+        if match_stride:
+            """
+            Drop first two and last two frames, which are added, because of padding. Now num_frames * hop_length = num_samples.
+            """
+            stft = stft[..., 2:-2]
+        # magnitude = torch.abs(stft)
+        magnitude = stft.abs()
+        angle = stft.angle()
+
+        nf = magnitude.shape[2]
+        mel_basis = self.get_mel_filters(
+            self.sampling_rate, 2 * (nf - 1), n_mels, fmin, fmax
+        )
+        mel_basis = torch.from_numpy(mel_basis).to(wav.device)
+        mel_spectrogram = magnitude.transpose(2, -1) @ mel_basis.T
+        mel_spectrogram = mel_spectrogram.transpose(-1, 2)
+
+        return mel_spectrogram, angle
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+        """Computes mel loss between an estimate and a reference
+        signal.
+
+        Parameters
+        ----------
+        x : torch.Tensor
+            Estimate signal
+        y : torch.Tensor
+            Reference signal
+
+        Returns
+        -------
+        torch.Tensor
+            Mel loss.
+        """
+
+        loss = 0.0
+        for n_mels, fmin, fmax, s in zip(
+            self.n_mels, self.mel_fmin, self.mel_fmax, self.stft_params
+        ):
+            kwargs = {
+                "n_mels": n_mels,
+                "fmin": fmin,
+                "fmax": fmax,
+                **s,
+            }
+
+            x_mels, x_angle = self.mel_spectrogram(x, **kwargs)
+            y_mels, y_angle = self.mel_spectrogram(y, **kwargs)
+            x_logmels = torch.log(
+                x_mels.clamp(min=self.clamp_eps).pow(self.pow)
+            ) / torch.log(torch.tensor(10.0))
+            y_logmels = torch.log(
+                y_mels.clamp(min=self.clamp_eps).pow(self.pow)
+            ) / torch.log(torch.tensor(10.0))
+
+            loss += self.log_weight * self.loss_fn(x_logmels, y_logmels)
+            loss += self.mag_weight * self.loss_fn(x_mels, y_mels)
+            loss += kwargs["phase_loss_amount"] * self.angle_loss_fn(x_angle, y_angle)
+
+        return loss
+
     
 
 ## for discriminators

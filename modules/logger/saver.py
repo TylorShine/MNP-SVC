@@ -7,6 +7,7 @@ modified by: TylorShine
 import os
 import glob
 import json
+import shutil
 import time
 import yaml
 import datetime
@@ -34,6 +35,7 @@ class Saver(object):
         self.expdir = args.env.expdir
         self.pretrained = args.env.pretrained
         self.sample_rate = args.data.sampling_rate
+        self.args = args
         
         self.hf = args.hf
         
@@ -208,7 +210,7 @@ class Saver(object):
             
             unwrapped_model = self.accelerator.unwrap_model(model)
             # load model
-            unwrapped_model.load_state_dict(ckpt["model"], strict=False)
+            unwrapped_model.load_state_dict(ckpt if not "model" in ckpt else ckpt["model"], strict=False)
             
             if ckpt.get('optimizer') != None:
                 unwrapped_optimizer = self.accelerator.unwrap_model(optimizer)
@@ -234,11 +236,15 @@ class Saver(object):
         
         if self.hf is not None and self.hf.get("push_to_hub") == True and self.hf_api is not None:
             if self.hf_future is not None:
-                if self.hf_future.done():
-                    self.hf_future.result()
-                else:
-                    self.accelerator.print(f"Model upload still in progress, skipping this save.")
-                    return
+                try:
+                    if self.hf_future.done():
+                        self.hf_future.result()
+                    else:
+                        self.accelerator.print(f"Model upload still in progress, skipping this save.")
+                        return
+                except Exception as e:
+                    self.accelerator.print(f"Failed to upload model to hub: {e}\nskipping upload.")
+                    pass
             self.hf_future = self.hf_api.upload_folder(
                 **self.hf.get("upload"),
                 repo_id=self.hf.repo.get("repo_id"),
@@ -270,6 +276,15 @@ class Saver(object):
         
         # save model
         self.accelerator.save_model(model, path_pt, safe_serialization=False)
+        
+        # save config
+        path_config = os.path.join(self.expdir, name+postfix, 'config.yaml')
+        with open(path_config, "w") as out_config:
+            yaml.dump(dict(self.args), out_config)
+            
+        # copy spk_info
+        path_spk = os.path.join(self.expdir, 'spk_info.npz')
+        shutil.copy2(path_spk, os.path.join(self.expdir, name+postfix, 'spk_info.npz'))
 
         # # save
         # save_model = {

@@ -25,8 +25,8 @@ class DiscriminatorSpec(torch.nn.Module):
         super(DiscriminatorSpec, self).__init__()
         self.period = period
         # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
-        # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
-        self.spec = torchaudio.transforms.Spectrogram(period, center=True, pad_mode="reflect", power=None)
+        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
+        # self.spec = torchaudio.transforms.Spectrogram(period, center=True, pad_mode="reflect", power=None)
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
         self.convs = nn.ModuleList(
@@ -260,6 +260,251 @@ class DiscriminatorP(torch.nn.Module):
             x = torch.flatten(x, 1, -1)
 
         return x, fmap
+    
+    
+# Adapted from https://github.com/open-mmlab/Amphion/blob/main/models/vocoders/gan/discriminator/mssbcqtd.py under the MIT license.
+class DiscriminatorCQT(nn.Module):
+    def __init__(self, hop_length: int, n_octaves:int, bins_per_octave: int,
+                 sampling_rate: float = 44100., filters: int = 128, max_filters: int = 1024, dilations: list[int] = [1, 2, 4],
+                 normalize_volume: bool = False,
+                 in_channels: int = 1, out_channels: int = 1):
+        super().__init__()
+
+        self.filters = filters
+        self.max_filters = max_filters
+        self.filters_scale = 1
+        self.kernel_size = (3, 9)
+        self.dilations = dilations
+        self.stride = (1, 2)
+
+        self.in_channels = in_channels
+        self.out_channels = out_channels
+        self.fs = sampling_rate
+        self.hop_length = hop_length
+        self.n_octaves = n_octaves
+        self.bins_per_octave = bins_per_octave
+
+        # Lazy-load
+        from nnAudio import features
+
+        # self.cqt_transform = features.cqt.CQT2010v2(
+        self.cqt_transform = features.cqt.CQT1992v2(
+            # sr=self.fs * 2,
+            sr=self.fs,
+            hop_length=self.hop_length,
+            n_bins=self.bins_per_octave * self.n_octaves,
+            bins_per_octave=self.bins_per_octave,
+            output_format="Complex",
+            pad_mode="constant",
+        )
+
+        self.conv_pres = nn.ModuleList()
+        for _ in range(self.n_octaves):
+            self.conv_pres.append(
+                nn.Conv2d(
+                    self.in_channels * 2,
+                    self.in_channels * 2,
+                    kernel_size=self.kernel_size,
+                    padding=self.get_2d_padding(self.kernel_size),
+                )
+            )
+
+        self.convs = nn.ModuleList()
+
+        self.convs.append(
+            nn.Conv2d(
+                self.in_channels * 2,
+                self.filters,
+                kernel_size=self.kernel_size,
+                padding=self.get_2d_padding(self.kernel_size),
+            )
+        )
+
+        in_chs = min(self.filters_scale * self.filters, self.max_filters)
+        for i, dilation in enumerate(self.dilations):
+            out_chs = min(
+                (self.filters_scale ** (i + 1)) * self.filters, self.max_filters
+            )
+            self.convs.append(
+                weight_norm(
+                    nn.Conv2d(
+                        in_chs,
+                        out_chs,
+                        kernel_size=self.kernel_size,
+                        stride=self.stride,
+                        dilation=(dilation, 1),
+                        padding=self.get_2d_padding(self.kernel_size, (dilation, 1)),
+                    )
+                )
+            )
+            in_chs = out_chs
+        out_chs = min(
+            (self.filters_scale ** (len(self.dilations) + 1)) * self.filters,
+            self.max_filters,
+        )
+        self.convs.append(
+            weight_norm(
+                nn.Conv2d(
+                    in_chs,
+                    out_chs,
+                    kernel_size=(self.kernel_size[0], self.kernel_size[0]),
+                    padding=self.get_2d_padding(
+                        (self.kernel_size[0], self.kernel_size[0])
+                    ),
+                )
+            )
+        )
+
+        # self.conv_post = weight_norm(
+        #     nn.Conv2d(
+        #         out_chs,
+        #         self.out_channels,
+        #         kernel_size=(self.kernel_size[0], self.kernel_size[0]),
+        #         padding=self.get_2d_padding((self.kernel_size[0], self.kernel_size[0])),
+        #     )
+        # )
+        
+        self.conv_post = SANConv2d(
+            out_chs,
+            self.out_channels,
+            kernel_size=(self.kernel_size[0], self.kernel_size[0]),
+            padding=self.get_2d_padding((self.kernel_size[0], self.kernel_size[0])),
+        )
+
+        self.activation = torch.nn.LeakyReLU(negative_slope=0.1)
+        # self.resample = torchaudio.transforms.Resample(orig_freq=self.fs, new_freq=self.fs * 2)
+
+        self.cqtd_normalize_volume = normalize_volume
+        if self.cqtd_normalize_volume:
+            print(
+                f"[INFO] cqtd_normalize_volume set to True. Will apply DC offset removal & peak volume normalization in CQTD!"
+            )
+
+    def get_2d_padding(
+        self,
+        kernel_size: tuple[int, int],
+        dilation: tuple[int, int] = (1, 1),
+    ):
+        return (
+            ((kernel_size[0] - 1) * dilation[0]) // 2,
+            ((kernel_size[1] - 1) * dilation[1]) // 2,
+        )
+
+    def forward(self, x: torch.tensor, flg_train: bool = False) -> tuple[torch.Tensor, list[torch.Tensor]]:
+        fmap = []
+
+        if self.cqtd_normalize_volume:
+            # Remove DC offset
+            x = x - x.mean(dim=-1, keepdims=True)
+            # Peak normalize the volume of input audio
+            x = 0.8 * x / (x.abs().max(dim=-1, keepdim=True)[0] + 1e-9)
+
+        # x = self.resample(x)
+
+        z = self.cqt_transform(x)
+
+        z_amplitude = z[:, :, :, 0].unsqueeze(1)
+        z_phase = z[:, :, :, 1].unsqueeze(1)
+
+        z = torch.cat([z_amplitude, z_phase], dim=1)
+        z = torch.permute(z, (0, 1, 3, 2))  # [B, C, W, T] -> [B, C, T, W]
+
+        latent_z = []
+        for i in range(self.n_octaves):
+            latent_z.append(
+                self.conv_pres[i](
+                    z[
+                        :,
+                        :,
+                        :,
+                        i * self.bins_per_octave : (i + 1) * self.bins_per_octave,
+                    ]
+                )
+            )
+        latent_z = torch.cat(latent_z, dim=-1)
+
+        for i, l in enumerate(self.convs):
+            latent_z = l(latent_z)
+
+            latent_z = self.activation(latent_z)
+            fmap.append(latent_z)
+
+        # latent_z = self.conv_post(latent_z)
+        latent_z = self.conv_post(latent_z, flg_train=flg_train)
+        
+        if flg_train:
+            latent_z_fun, latent_z_dir = latent_z
+            fmap.append(latent_z_fun)
+            latent_z_fun = torch.flatten(latent_z_fun, 1, -1)
+            latent_z_dir = torch.flatten(latent_z_dir, 1, -1)
+            latent_z = (latent_z_fun, latent_z_dir)
+        else:
+            fmap.append(latent_z)
+            latent_z = torch.flatten(latent_z, 1, -1)
+
+        return latent_z, fmap
+
+
+class MultiScaleSubbandCQTDiscriminator(nn.Module):
+    def __init__(self, hop_lengths: list[int] = [512, 256, 256],
+                 n_octaves: list[int] = [9, 9, 9], bins_per_octave: list[int] = [24, 36, 48],
+                #  sampling_rate: float = 44100., filters: int = 128, max_filters: int = 1024, dilations: list[int] = [1, 2, 4],
+                sampling_rate: float = 44100., filters: int = 64, max_filters: int = 256, dilations: list[int] = [1, 4],
+                 normalize_volume: bool = False,
+                 in_channels: int = 1, out_channels: int = 1):
+        super().__init__()
+
+        self.cqtd_filters = filters
+        self.cqtd_max_filters = max_filters
+        self.cqtd_filters_scale = 1
+        self.cqtd_dilations = dilations
+        self.cqtd_in_channels = in_channels
+        self.cqtd_out_channels = out_channels
+        # Multi-scale params to loop over
+        self.cqtd_hop_lengths = hop_lengths
+        self.cqtd_n_octaves = n_octaves
+        self.cqtd_bins_per_octaves = bins_per_octave
+
+        self.discriminators = nn.ModuleList(
+            [
+               DiscriminatorS(use_spectral_norm=False)
+            ] +
+            [
+                DiscriminatorCQT(
+                    hop_length=self.cqtd_hop_lengths[i],
+                    n_octaves=self.cqtd_n_octaves[i],
+                    bins_per_octave=self.cqtd_bins_per_octaves[i],
+                    sampling_rate=sampling_rate, filters=self.cqtd_filters, max_filters=self.cqtd_max_filters,
+                    dilations=self.cqtd_dilations, normalize_volume=normalize_volume,
+                    in_channels=self.cqtd_in_channels, out_channels=self.cqtd_out_channels,
+                )
+                for i in range(len(self.cqtd_hop_lengths))
+            ]
+        )
+
+    def forward(self, y: torch.Tensor, y_hat: torch.Tensor, flg_train: bool = False) -> tuple[
+        list[torch.Tensor],
+        list[torch.Tensor],
+        list[list[torch.Tensor]],
+        list[list[torch.Tensor]],
+    ]:
+
+        y_d_rs = []
+        y_d_gs = []
+        fmap_rs = []
+        fmap_gs = []
+
+        for disc in self.discriminators:
+            # y_d_r, fmap_r = disc(y)
+            # y_d_g, fmap_g = disc(y_hat)
+            y_d_r, fmap_r = disc(y, flg_train=flg_train)
+            y_d_g, fmap_g = disc(y_hat, flg_train=flg_train)
+            y_d_rs.append(y_d_r)
+            fmap_rs.append(fmap_r)
+            y_d_gs.append(y_d_g)
+            fmap_gs.append(fmap_g)
+
+        return y_d_rs, y_d_gs, fmap_rs, fmap_gs
 
 
 class MultiSpecDiscriminator(torch.nn.Module):
@@ -286,7 +531,7 @@ class MultiSpecDiscriminator(torch.nn.Module):
         # periods = [7, 13, 46, 178]
         # periods = [7, 13, 43]
         # periods = [3, 7, 17]
-        periods = [128, 512, 2048]
+        periods = [512, 2048, 128]
 
         discs = [DiscriminatorS(use_spectral_norm=use_spectral_norm)]
         discs = discs + [

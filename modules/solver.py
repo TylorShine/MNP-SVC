@@ -123,23 +123,23 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     accelerator.init_trackers(
         project_name=args.env.project_name)
     
-    model, optimizer, scheduler, model_d, optimizer_d, scheduler_d, loss_func, loader_train, loader_test = accelerator.prepare(
-        model, optimizer, scheduler,
-        model_d, optimizer_d, scheduler_d,
-        loss_func,
-        loader_train, loader_test
-    )
+    # model, optimizer, scheduler, model_d, optimizer_d, scheduler_d, loss_func, loader_train, loader_test = accelerator.prepare(
+    #     model, optimizer, scheduler,
+    #     model_d, optimizer_d, scheduler_d,
+    #     loss_func,
+    #     loader_train, loader_test
+    # )
     
-    # accelerator.register_for_checkpointing(scheduler)
+    # # accelerator.register_for_checkpointing(scheduler)
     
-    # initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
+    # # initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
     
-    state_loaded = saver.load_state()
-    if not state_loaded:
-        state_loaded = saver.load_from_pretrained(
-            model, optimizer)
-        if not state_loaded:
-            print(f"No state found at {args.env.expdir} and no pretrained found at {args.env.pretrained}, starting from scratch")
+    # state_loaded = saver.load_state()
+    # if not state_loaded:
+    #     state_loaded = saver.load_from_pretrained(
+    #         model, optimizer)
+    #     if not state_loaded:
+    #         print(f"No state found at {args.env.expdir} and no pretrained found at {args.env.pretrained}, starting from scratch")
     
     # device = args.device
     device = accelerator.device
@@ -149,6 +149,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
         model_d.to(device)
     
     last_model_save_step = saver.global_step
+    
+    # unwrapped_model = accelerator.unwrap_model(model)
     
     # run
     num_batches = len(loader_train)
@@ -406,8 +408,27 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
         for param_name, param in model.named_parameters():
             if not any([param_name.startswith(p) for p in train_params]):
                 param.requires_grad = False
+                
+    model, optimizer, scheduler, model_d, optimizer_d, scheduler_d, loss_func, loader_train, loader_test = accelerator.prepare(
+        model, optimizer, scheduler,
+        model_d, optimizer_d, scheduler_d,
+        loss_func,
+        loader_train, loader_test
+    )
+    
+    # accelerator.register_for_checkpointing(scheduler)
+    
+    # initial_global_step, model, optimizer, states = load_model(args.env.expdir, model, optimizer, device=args.device)
+    
+    state_loaded = saver.load_state()
+    if not state_loaded:
+        state_loaded = saver.load_from_pretrained(
+            model, optimizer)
+        if not state_loaded:
+            print(f"No state found at {args.env.expdir} and no pretrained found at {args.env.pretrained}, starting from scratch")
     
     # model size
+    # model_dict = {'model': unwrapped_model}
     model_dict = {'model': model}
     if model_d is not None:
         model_dict['discriminator'] = model_d
@@ -443,6 +464,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
             f0 = data['f0']
             volume = data['volume']
             audio = data['audio']
+            
+            # # TEMP
+            # units = units.float()
+            # f0 = f0.float()
+            # volume = volume.float()
+            # audio = audio.float()
             
             # torch.compiler.cudagraph_mark_step_begin()
             
@@ -493,7 +520,9 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # else:
                 #     with autocast(device_type=args.device, dtype=dtype):
                 with accelerator.autocast():
-                    signal = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    # signal = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    #                             infer=False)
+                    signal = model(units, f0, volume, data[spk_id_key],
                                                 infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
                                             
@@ -555,10 +584,11 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # min_len = np.min([signal.shape[1], audio.shape[1]])
                 # signal = signal[:,:min_len]
                 # audio = audio[:,:min_len]
-                
                 losses.append(loss_func(signal, audio))
             
             loss = torch.stack(losses).sum()
+            
+            # accelerator.print(f"Step {saver.global_step} loss: {loss.item()}")
                 
             if not freeze_model:
                 # handle nan loss
@@ -582,8 +612,6 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     optimizer.step()
             # elif model_d is not None and dtype != torch.float32:
             #     scaler.update()
-
-
 
             # log loss
             if saver.global_step % args.train.interval_log == 0:
@@ -610,7 +638,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 log_dict = {
                     "train/generator/loss": loss.item(),
                     "train/generator/learning_rate": scheduler.get_last_lr()[0],
-                    "train/batch_time": args.train.interval_log/saver.get_interval_time(),
+                    "train/batch_time": args.train.interval_log/(saver.get_interval_time()+1e-6),
                     "train/epoch": epoch,
                     "train/step": saver.global_step,
                 }
@@ -644,27 +672,29 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 #     'last_lr': scheduler.get_last_lr(),
                 # }
                 
+                # save model
+                saver.save_model(model, postfix=f'_{saver.global_step}')
+                
                 # save states
                 if args.train.save_states:
                     saver.save_state()
                     
-                # save latest
-                # saver.save_model(model, postfix=f'_{saver.global_step}', states=states)
-                saver.save_model(model, postfix=f'_{saver.global_step}')
                 
-                if model_d is not None:
-                    # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
-                    # states_d = {
-                    #     'scheduler': scheduler_d.state_dict(),
-                    #     'last_lr': scheduler_d.get_last_lr(),
-                    # }
+                # saver.save_model(model, postfix=f'_{saver.global_step}', states=states)
+                
+                # if model_d is not None:
+                #     # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
+                #     # states_d = {
+                #     #     'scheduler': scheduler_d.state_dict(),
+                #     #     'last_lr': scheduler_d.get_last_lr(),
+                #     # }
 
-                    # save latest discriminator
-                    saver.save_model(model_d, postfix=f'D_{saver.global_step}')
-                    # saver.save_model(model_d, optimizer_d_save, postfix=f'D_{saver.global_step}', states=states_d)
+                #     # save latest discriminator
+                #     saver.save_model(model_d, postfix=f'D_{saver.global_step}')
+                #     # saver.save_model(model_d, optimizer_d_save, postfix=f'D_{saver.global_step}', states=states_d)
                     
-                    # if last_model_save_step > 0:
-                    #     saver.delete_model(postfix=f'D_{last_model_save_step}')
+                #     # if last_model_save_step > 0:
+                #     #     saver.delete_model(postfix=f'D_{last_model_save_step}')
                         
                 last_model_save_step = saver.global_step
 
@@ -708,22 +738,22 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
     accelerator.wait_for_everyone()
     
     if accelerator.is_main_process:
-        if args.train.save_states:
-            saver.save_state()
-            
         # save latest
         saver.save_model(model, postfix=f'_{saver.global_step}')
         
-        if model_d is not None:
-            # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
-            # states_d = {
-            #     'scheduler': scheduler_d.state_dict(),
-            #     'last_lr': scheduler_d.get_last_lr(),
-            # }
-            saver.save_model(model_d, postfix=f'D_{saver.global_step}')
+        if args.train.save_states:
+            saver.save_state()
+        
+        # if model_d is not None:
+        #     # optimizer_d_save = optimizer_d if args.train.save_discriminator_opt else None
+        #     # states_d = {
+        #     #     'scheduler': scheduler_d.state_dict(),
+        #     #     'last_lr': scheduler_d.get_last_lr(),
+        #     # }
+        #     saver.save_model(model_d, postfix=f'D_{saver.global_step}')
             
-            if last_model_save_step > 0 and last_model_save_step != saver.global_step:
-                saver.delete_model(postfix=f'D_{last_model_save_step}')
+        #     if last_model_save_step > 0 and last_model_save_step != saver.global_step:
+        #         saver.delete_model(postfix=f'D_{last_model_save_step}')
                 
         last_model_save_step = saver.global_step
         

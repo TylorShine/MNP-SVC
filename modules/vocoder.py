@@ -8,6 +8,11 @@ import yaml
 
 from modules.common import DotDict, complex_mul_in_real_3d
 
+from nnAudio import (
+    features as feat,
+    utils as nnAudioUtils,
+)
+
 
 def load_model(
         model_path,
@@ -82,7 +87,11 @@ def load_model(
     print(' [Loading] ' + model_path)
     ckpt = torch.load(model_path, map_location=torch.device(device))
     model.to(device)
-    model.load_state_dict(ckpt['model'])
+    if 'model' in ckpt:
+        ckpt = ckpt['model']
+    else:
+        ckpt = ckpt
+    model.load_state_dict(ckpt)
     model.eval()
     
     if args.model.use_speaker_embed:
@@ -276,7 +285,8 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         self.register_buffer("noise_seed", torch.tensor(noise_seed))
         
         if use_short_filter or use_noise_short_filter:
-            self.register_buffer("window_s", torch.hann_window(16))
+            self.register_buffer("window_s", torch.bartlett_window(16))
+            # self.register_buffer("window_s", torch.hann_window(16))
             # self.register_buffer("window_s", torch.hann_window(32))
         
         if add_noise is None:
@@ -395,6 +405,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             ).real.roll(ceps_windowed_sinc.shape[0]//2-1)[:ceps_windowed_sinc.shape[0]//2]
                 * torch.hann_window(win_length*2)[win_length:],
         )
+        # )).unsqueeze(0)
         self.register_buffer('static_freq_minphase_wsinc', static_freq_minphase_wsinc)
         
         ## TODO: necessary?
@@ -421,9 +432,53 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             torch.exp(torch.fft.fft(ceps_windowed_sinc))
             ).real.roll(ceps_windowed_sinc.shape[0]//2-1)[:ceps_windowed_sinc.shape[0]//2],
             (0, win_length - (block_size//2))
+        # ) )).unsqueeze(0)
         ) )
         
         self.register_buffer('static_freq_minphase_wsinc_env', static_freq_minphase_wsinc_env)
+        
+        # # functional stft from nnAudio
+        # self.stft = feat.stft.STFT(n_fft=win_length,
+        #                       win_length=win_length,
+        #                       hop_length=block_size,
+        #                       window='hann',
+        #                       freq_bins=None,
+        #                       freq_scale='no',
+        #                       center=True,
+        #                       pad_mode='constant',
+        #                       iSTFT=True,
+        #                     #   iSTFT=False,
+        #                       output_format='Complex',
+        #                       verbose=True)
+        
+        # self.stft_noise = feat.stft.STFT(n_fft=win_length,
+        #                       win_length=win_length,
+        #                       hop_length=block_size,
+        #                       window='hann',
+        #                       freq_bins=None,
+        #                       freq_scale='no',
+        #                       center=True,
+        #                       pad_mode='constant',
+        #                       iSTFT=False,
+        #                       output_format='Complex',
+        #                       verbose=False)
+        
+        # self.istft = feat.stft.iSTFT(n_fft=win_length,
+        #                         win_length=win_length,
+        #                         hop_length=block_size,
+        #                         window='hann',
+        #                         freq_bins=None,
+        #                         freq_scale='no',
+        #                         center=True,
+        #                         # iSTFT=True,
+        #                         verbose=True)
+        
+        # # multiplication of complex values
+        # self.cmul_2d = lambda a, b: \
+        #     torch.stack((a[:, :, 0]*b[:, :, 0] - a[:, :, 1]*b[:, :, 1], a[:, :, 0]*b[:, :, 1] + a[:, :, 1]*b[:, :, 0]), -1)
+            
+        # self.cmul_3d = lambda a, b: \
+        #     torch.stack((a[:, :, :, 0]*b[:, :, :, 0] - a[:, :, :, 1]*b[:, :, :, 1], a[:, :, :, 0]*b[:, :, :, 1] + a[:, :, :, 1]*b[:, :, :, 0]), -1)
         
 
     def forward(self, units_frames, f0_frames, volume_frames,
@@ -455,7 +510,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         # add f0 variance
         # this expected suppress leakage of original speaker's f0 features
         # but get blurred pitch and I don't think that necessary.
-        f0_variance = torch.rand_like(f0)*self.f0_input_variance
+        f0_variance = torch.randn_like(f0)*self.f0_input_variance
         f0 = (f0 * 2.**(-self.f0_input_variance/12.))*(2.**(f0_variance/12.))   # semitone units
         if infer:
             # TODO: maybe this is for precision, but necessary?
@@ -500,15 +555,34 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         # filters
         # pi_j = torch.complex(0., torch.pi)
         # src_filter = torch.exp(ctrls['harmonic_magnitude'] + 1.j * torch.pi * ctrls['harmonic_phase'])
-        src_filter = torch.exp(ctrls['harmonic_magnitude'] + 3.141592653589793j * ctrls['harmonic_phase'])
+        # src_filter = torch.exp(ctrls['harmonic_magnitude'] + 3.141592653589793j * ctrls['harmonic_phase'])
+        # src_filter = torch.exp(ctrls['harmonic_magnitude'] + 3.141592653589793j * ctrls['harmonic_phase'])
+        # src_filter = torch.exp(ctrls['harmonic_magnitude'])
+        # src_filter_i = src_filter * torch.sin(ctrls['harmonic_phase'])
+        # src_filter = src_filter * torch.cos(ctrls['harmonic_phase'])
+        # src_filter = torch.exp(ctrls['harmonic_magnitude'] + 3.141592653589793j * ctrls['harmonic_phase'])
         # src_filter = torch.exp(ctrls['harmonic_magnitude'].reshape(x.shape[0], -1, self.win_length//2+1) + 3.141592653589793j * ctrls['harmonic_phase'].reshape(x.shape[0], -1, self.win_length//2+1))
         # src_filter = torch.exp(torch.complex(ctrls['harmonic_magnitude'], + torch.pi * ctrls['harmonic_phase']))
+        src_filter = torch.exp(ctrls['harmonic_magnitude'] + 1.j * ctrls['harmonic_phase'])
         src_filter = torch.cat((src_filter, src_filter[:,-1:,:]), 1).permute(0, 2, 1)
         
+        # src_filter = torch.stack((src_filter, src_filter_i), -1)
+        # src_filter = torch.cat((src_filter, src_filter[:,-1:,:,:]), 1).permute(0, 2, 1, 3)
+        # src_filter = torch.view_as_complex(src_filter)
+        
         if self.use_noise:
-            noise_filter = torch.exp(ctrls['noise_magnitude'] + 3.141592653589793j * ctrls['noise_phase'])/self.block_size
-            # noise_filter = torch.exp(ctrls['noise_magnitude'].reshape(x.shape[0], -1, self.win_length//2+1) + 3.141592653589793j * ctrls['noise_phase'].reshape(x.shape[0], -1, self.win_length//2+1))/self.block_size
-            # noise_filter = torch.exp(torch.complex(ctrls['noise_magnitude'], torch.pi * ctrls['noise_phase']))/self.block_size
+            # noise_filter = torch.exp(ctrls['noise_magnitude'] + 3.141592653589793j * ctrls['noise_phase'])/self.block_size
+            # # noise_filter = torch.exp(ctrls['noise_magnitude'].reshape(x.shape[0], -1, self.win_length//2+1) + 3.141592653589793j * ctrls['noise_phase'].reshape(x.shape[0], -1, self.win_length//2+1))/self.block_size
+            # # noise_filter = torch.exp(torch.complex(ctrls['noise_magnitude'], torch.pi * ctrls['noise_phase']))/self.block_size
+            # noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:]), 1).permute(0, 2, 1)
+            # noise_filter = torch.exp(ctrls['noise_magnitude'])
+            # noise_filter_i = noise_filter * torch.sin(ctrls['noise_phase'])
+            # noise_filter = noise_filter * torch.cos(ctrls['noise_phase'])
+            # noise_filter = torch.stack((noise_filter, noise_filter_i), -1)
+            # noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:,:]), 1).permute(0, 2, 1, 3)
+            # noise_filter = torch.view_as_complex(noise_filter)
+            
+            noise_filter = torch.exp(ctrls['noise_magnitude'] + 1.j * ctrls['noise_phase'])
             noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:]), 1).permute(0, 2, 1)
 
         if self.add_noise:
@@ -634,20 +708,25 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
                     center = True)
             
             if self.use_noise_env:
-                if not self.noise_to_harmonic_phase:
-                    # TODO: log10 necessary?
-                    # noise_env_flat = (torch.log10(torch.clamp(ctrls['noise_envelope_magnitude'], min=0.0)*9. + 1.)).flatten(1)
-                    noise_env_flat = (ctrls['noise_envelope_magnitude']).flatten(1)
-                else:
-                    # noise_env_flat = (torch.clamp(ctrls['noise_envelope_magnitude'], min=0.0)).flatten(1)
-                    noise_env_flat = (ctrls['noise_envelope_magnitude']).flatten(1)
+                # if not self.noise_to_harmonic_phase:
+                #     # TODO: log10 necessary?
+                #     # noise_env_flat = (torch.log10(torch.clamp(ctrls['noise_envelope_magnitude'], min=0.0)*9. + 1.)).flatten(1)
+                #     noise_env_flat = (ctrls['noise_envelope_magnitude']).flatten(1)
+                # else:
+                #     # noise_env_flat = (torch.clamp(ctrls['noise_envelope_magnitude'], min=0.0)).flatten(1)
+                # noise_env_flat = (ctrls['noise_envelope_magnitude']).flatten(1)
+                # noise_env_flat = (torch.clamp(ctrls['noise_envelope_magnitude'], min=0.0)).flatten(1)
+                noise_env_flat = (F.relu(ctrls['noise_envelope_magnitude'])).flatten(1)
                 noise_env_exp = torch.cat((noise_env_flat, noise_env_flat[:, -1:]), 1)
                 noise_env_slopes = (noise_env_exp[:, 1:] - noise_env_exp[:, :-1]).unsqueeze(-1).repeat(1, 1, self.noise_env_size_downsamples).flatten(1)
                 noise_env_repeat_idx = (torch.arange(self.noise_env_size_downsamples).to(noise_env_flat)/self.noise_env_size_downsamples).unsqueeze(-1).transpose(1, 0).repeat(noise_env_flat.shape)
                 noise_env = noise_env_flat.unsqueeze(-1).repeat(1, 1, self.noise_env_size_downsamples).flatten(1) + noise_env_slopes*noise_env_repeat_idx/self.noise_env_size_downsamples
                 noise_t = noise_t * noise_env
         
-        
+        # with torch.no_grad():
+        # combtooth_stft = self.stft(combtooth, output_format='Complex')
+        # print(combtooth_stft.shape)
+        # combtooth_stft = self.cmul_3d(combtooth_stft, self.static_freq_minphase_wsinc.unsqueeze(-2).repeat(combtooth.shape[0], 1, combtooth.shape[1]//self.block_size + 1, 1))
         combtooth_stft = torch.stft(
                             combtooth,
                             n_fft = self.win_length,
@@ -660,15 +739,63 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
                             # pad_mode = pad_mode)
                             pad_mode = pad_mode) * self.static_freq_minphase_wsinc.unsqueeze(-1).repeat(1, combtooth.shape[1]//self.block_size + 1)
                             # pad_mode = pad_mode) * self.static_freq_minphase_wsinc.unsqueeze(-1).repeat(1, combtooth.shape[1]//(self.block_size//4) + 1)
+        
+        # combtooth_stft = torch.view_as_real(torch.stft(
+        #                     combtooth,
+        #                     n_fft = self.win_length,
+        #                     win_length = self.win_length,
+        #                     hop_length = self.block_size,
+        #                     # hop_length = self.block_size//4,
+        #                     window = self.window,
+        #                     center = True,
+        #                     return_complex = True,
+        #                     # pad_mode = pad_mode)
+        #                     pad_mode = pad_mode))
+        # sfilt = self.static_freq_minphase_wsinc.unsqueeze(-2).repeat(combtooth.shape[0], 1, combtooth.shape[1]//self.block_size + 1, 1)
+        
+        # print(combtooth_stft.shape, sfilt.shape)
+        
+        # combtooth_stft = self.cmul_3d(combtooth_stft, sfilt)
+        
         # print(combtooth_stft.shape, self.static_freq_minphase_wsinc[None, :, None].repeat(combtooth.shape[0], 1, combtooth.shape[1]//self.block_size + 1).shape)
         # combtooth_stft = complex_mul_in_real_3d(combtooth_stft, self.static_freq_minphase_wsinc[None, :, None].repeat(combtooth.shape[0], 1, combtooth.shape[1]//self.block_size + 1))
         # and apply predicted filter
         # print(combtooth_stft.shape, src_filter.shape)
         combtooth_stft = combtooth_stft * src_filter
+        # combtooth_stft = self.cmul_3d(combtooth_stft, src_filter)
         # combtooth_stft = complex_mul_in_real_3d(combtooth_stft, src_filter)
+        # print(combtooth_stft.shape)
+        
+        # if self.use_noise:
+        #     noise_t = self.static_noise_t.unsqueeze(0).repeat(combtooth.shape[0], combtooth.shape[1]//self.static_noise_t.shape[0] + 1)[:, :combtooth.shape[1]]
+            
+        #     # NOTE: can precalculate if noise env is not using
+        #     # with torch.no_grad():
+        #     # noise_stft = self.stft(noise_t, output_format='Complex')
+        #     noise_stft = torch.stft(
+        #         noise_t,
+        #         n_fft = self.win_length,
+        #         win_length = self.win_length,
+        #         hop_length = self.block_size,
+        #         # hop_length = self.block_size//4,
+        #         window = self.window,
+        #         center = True,
+        #         return_complex = True,
+        #         pad_mode = pad_mode)
+                
+        #     if self.use_noise_env:
+        #         # noise_stft = noise_stft * self.static_freq_minphase_wsinc_env.unsqueeze(-2).repeat(1, combtooth_stft.shape[2], 1)    # TODO: should this and necessary?
+        #         # noise_stft = self.cmul_3d(noise_stft, self.static_freq_minphase_wsinc_env.unsqueeze(-2).repeat(noise_t.shape[0], 1, combtooth_stft.shape[2], 1))    # TODO: should this and necessary?
+        #         noise_stft = noise_stft * self.static_freq_minphase_wsinc_env.unsqueeze(-1).repeat(1, combtooth_stft.shape[2])    # TODO: should this and necessary?
+        #         # noise_stft = complex_mul_in_real_3d(noise_stft, self.static_freq_minphase_wsinc_env.unsqueeze(-1).repeat(1, combtooth_stft.shape[2]))
+        #         # noise_stft *= self.static_freq_minphase_wsinc.unsqueeze(-1).repeat(1, combtooth_stft.shape[2])
+                
+        #     # apply predicted filter
+        #     noise_stft = noise_stft * noise_filter
+        #     # noise_stft = self.cmul_3d(noise_stft, noise_filter)
+        #     # noise_stft = complex_mul_in_real_3d(noise_stft, noise_filter)
         
         if self.use_noise:
-            # TODO: can precalculate if noise env is not using
             noise_stft = torch.stft(
                 noise_t,
                 n_fft = self.win_length,
@@ -679,15 +806,6 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
                 center = True,
                 return_complex = True,
                 pad_mode = pad_mode)
-                
-            if self.use_noise_env:
-                noise_stft = noise_stft * self.static_freq_minphase_wsinc_env.unsqueeze(-1).repeat(1, combtooth_stft.shape[2])    # TODO: should this and necessary?
-                # noise_stft = complex_mul_in_real_3d(noise_stft, self.static_freq_minphase_wsinc_env.unsqueeze(-1).repeat(1, combtooth_stft.shape[2]))
-                # noise_stft *= self.static_freq_minphase_wsinc.unsqueeze(-1).repeat(1, combtooth_stft.shape[2])
-                
-            # apply predicted filter
-            noise_stft = noise_stft * noise_filter
-            # noise_stft = complex_mul_in_real_3d(noise_stft, noise_filter)
             
         if self.use_phase_offset:
             signal_stft = combtooth_stft
@@ -722,6 +840,7 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
         else:
             if self.use_noise:
                 signal_stft = combtooth_stft + noise_stft
+                # signal_stft = combtooth_stft + torch.view_as_real(noise_stft)
             else:
                 signal_stft = combtooth_stft
         
@@ -736,6 +855,11 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             # hop_length = self.block_size//4,
             window = self.window,
             center = True)
+        # with torch.no_grad():
+        # signal = self.stft.inverse(signal_stft.contiguous())
+        # signal = self.istft(signal_stft, onesided=True)
+        
+        # print(signal.shape)
         
         # return signal, f0.reshape(f0.shape[0], -1, self.block_size)[:, :, 0:1]
         return signal
