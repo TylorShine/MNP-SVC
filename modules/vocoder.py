@@ -604,8 +604,8 @@ class CombSubMinimumNoisedPhase(torch.nn.Module):
             # noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:,:]), 1).permute(0, 2, 1, 3)
             # noise_filter = torch.view_as_complex(noise_filter)
             
-            # noise_filter = torch.exp(ctrls['noise_magnitude'] + 1.j * ctrls['noise_phase'])
-            noise_filter = torch.exp(ctrls['noise_magnitude'] + 1.j * torch.pi * ctrls['noise_phase'])/self.block_size
+            noise_filter = torch.exp(ctrls['noise_magnitude'] + 1.j * ctrls['noise_phase'])
+            # noise_filter = torch.exp(ctrls['noise_magnitude'] + 1.j * torch.pi * ctrls['noise_phase'])/self.block_size
             noise_filter = torch.cat((noise_filter, noise_filter[:,-1:,:]), 1).permute(0, 2, 1)
 
         if self.add_noise:
