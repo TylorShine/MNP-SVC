@@ -135,6 +135,7 @@ class Unit2ControlGE2E(nn.Module):
         # transformer
         self.decoder = ConvNeXtV2GLULikeEncoder(
             num_layers=3,
+            # num_layers=5,
             dim_model=n_hidden_channels,
             kernel_size=31,
             bottoleneck_dilation=2)
@@ -146,7 +147,7 @@ class Unit2ControlGE2E(nn.Module):
         self.n_out = sum([v for v in output_splits.values()])
         self.dense_out = weight_norm(nn.Linear(n_hidden_channels, self.n_out), dim=0)
 
-    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None, aug_shift = None, infer = False):
+    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None, aug_shift = None):
         '''
         input: 
             B x n_frames x n_unit
@@ -227,8 +228,16 @@ class Unit2ControlGE2E(nn.Module):
                 
         # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
         # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.7071*(1. if infer else 0.))
-        recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
-        x = x + self.recon[-1](recon)
+        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
+        # x = x + self.recon[-1](recon)
+        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.05)
+        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.01)
+        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*(2./3.))
+        # recon = self.recon[0](self.stack(units.transpose(2, 1) + torch.randn_like(units.transpose(2, 1))*(2./3.)) + recon_spk_emb)
+        # recon = self.recon[0](self.stack(units.transpose(2, 1) + torch.randn_like(units.transpose(2, 1))*0.05) + recon_spk_emb)
+        recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb)
+        # recon = self.recon[0](self.stack(units.transpose(2, 1)))
+        x = x + self.recon[1](recon)
         
         x = self.decoder(x)
         x = self.norm(x)
@@ -264,7 +273,7 @@ class Unit2ControlGE2E_export(Unit2ControlGE2E):
             conv_stack_middle_size=conv_stack_middle_size)
         
         
-    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None, aug_shift = None):
+    def forward(self, units, f0, phase, volume, spk_id = None, spk_mix = None):
         '''
         input: 
             B x n_frames x n_unit
@@ -274,8 +283,8 @@ class Unit2ControlGE2E_export(Unit2ControlGE2E):
         
         x = self.volume_embed(volume)
         
-        if self.aug_shift_embed is not None and aug_shift is not None:
-            x = x + self.aug_shift_embed(aug_shift / 5)
+        # if self.aug_shift_embed is not None and aug_shift is not None:
+        #     x = x + self.aug_shift_embed(aug_shift / 5)
             
         # frequency => harmonically linear: log2
         f0_emb = self.f0_embed((1+ f0 / 700).log2())
@@ -303,13 +312,26 @@ class Unit2ControlGE2E_export(Unit2ControlGE2E):
                         phase_emb.repeat(spk_id.shape[0], 1, 1).transpose(2, 1)) * spk_mix.repeat(1, x.shape[1], self.n_hidden_channels),
                     dim=0)
                 
-        x = x + self.stack(units.transpose(2, 1))
+        recon_spk_emb = torch.sum(
+            self.recon_spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size) *
+            spk_mix.repeat(1, x.shape[1], self.conv_stack_middle_size), dim=0)
+        
+        # x = x + self.stack(units.transpose(2, 1)) + recon_spk_embed
+                
+        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
+        # x = x + self.recon[-1](recon)
+        
+        recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb)
+        x = x + self.recon[1](recon)
         
         x = self.decoder(x)
         x = self.norm(x)
         e = self.dense_out(x)
         
-        return e
+        controls = split_to_dict(e, self.output_splits)
+        
+        # return e
+        return controls, x
     
     
 class Unit2ControlStackOnly(nn.Module):

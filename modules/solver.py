@@ -87,7 +87,7 @@ def test(args, model, loss_func, loader_test, saver, vocoder=None):
                 rtf_all.append(rtf)
             
                 # loss
-                loss = loss_func(data['audio'], signal)
+                loss = loss_func(signal, data['audio'])
 
                 test_loss += loss.item()
 
@@ -522,8 +522,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 with accelerator.autocast():
                     # signal = model(units.to(dtype), f0, volume, data[spk_id_key],
                     #                             infer=False)
-                    signal = model(units, f0, volume, data[spk_id_key],
-                                                infer=False)
+                    signal = model(units, f0, volume, data[spk_id_key])
+                                                # infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
                                             
             # optimizer_d.zero_grad()
@@ -569,7 +569,13 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 loss_fm = feature_loss(fmap_real, fmap_gen)
                 loss_gen, losses_gen = generator_loss(d_signal_gen)
                 
-                losses = [loss_gen*0.5, loss_fm*0.015]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm*0.02]    # TODO: parametrize
+                # losses = [loss_gen*0.5, loss_fm*0.015]    # TODO: parametrize
+                # losses = [loss_gen*0.25, loss_fm*0.01]    # TODO: parametrize
+                # losses = [loss_gen*0.25, loss_fm*0.01]    # TODO: parametrize
+                # losses = [loss_gen*0.25, loss_fm*0.1]    # TODO: parametrize
+                # losses = [loss_gen*0.5, loss_fm*0.2]    # TODO: parametrize
+                losses = [loss_gen*0.3, loss_fm*0.15]    # TODO: parametrize
             else:
                 optimizer.zero_grad()
                 losses = []
@@ -584,7 +590,10 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # min_len = np.min([signal.shape[1], audio.shape[1]])
                 # signal = signal[:,:min_len]
                 # audio = audio[:,:min_len]
-                losses.append(loss_func(signal, audio))
+                # with accelerator.autocast():
+                # losses.append(loss_func(signal, audio)*2.)
+                with accelerator.autocast():
+                    losses.append(loss_func(signal, audio)*5.)
             
             loss = torch.stack(losses).sum()
             

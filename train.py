@@ -7,12 +7,17 @@ import shutil
 from modules.common import load_config, load_model
 from modules.dataset.loader import get_data_loaders
 from modules.solver import train
-from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhaseStackOnly, NMPSFHiFi
+from modules.vocoder import CombSubMinimumNoisedPhase, CombSubMinimumNoisedPhase_export, CombSubMinimumNoisedPhaseStackOnly, NMPSFHiFi
 from modules.diffusion.vocoder import Unit2WavMinimumNoisedPhase
 from modules.reflow.vocoder import Unit2WavMinimumNoisedPhase as Unit2WavMinimumNoisedPhaseReflow, Unit2WavMinimumNoisedPhaseDirect, Unit2WavMinimumNoisedPhaseHidden
-from modules.discriminator import MultiSpecDiscriminator, MultiPeriodSignalDiscriminator, MultiScaleSubbandCQTDiscriminator
+from modules.discriminator import (
+    MultiSpecDiscriminator, MultiPeriodSignalDiscriminator,
+    MultiScaleSubbandCQTDiscriminator, MultiSpecMelDiscriminator, MultiMelDiscriminator,
+    MultiPeriodSpecDiscriminator
+)
 from modules.loss import (
     RSSLoss, DSSLoss, DLFSSLoss,
+    DLFSVWSLoss,
     DLFSSMPLoss, DLFSSMPMalLoss, DSMPMalLoss,
     DLFSSMPMalinblogsLoss, DLFSSMalinblogsLoss, MRLFSSMPMalinblogsLoss, MRSMPMalinblogsLoss,
     MRSMPL1Loss, MRLF4SMPMalinblogsLoss, MRRSMalinblogsLoss,
@@ -86,8 +91,11 @@ if __name__ == '__main__':
             # model.unit2ctrl.compile()
             model.unit2ctrl.compile(mode="reduce-overhead")
             if args.model.use_discriminator:
-                model_d = MultiSpecDiscriminator()
+                # model_d = MultiSpecMelDiscriminator(sampling_rate=args.data.sampling_rate)
+                # model_d = MultiMelDiscriminator(sampling_rate=args.data.sampling_rate)
+                # model_d = MultiSpecDiscriminator()
                 # model_d = MultiPeriodSignalDiscriminator()
+                model_d = MultiPeriodSpecDiscriminator()
                 # model_d = MultiScaleSubbandCQTDiscriminator(sampling_rate=args.data.sampling_rate)
                 # model_d.compile(mode="reduce-overhead")
     elif args.model.type == 'DiffusionMinimumNoisedPhase':
@@ -399,6 +407,9 @@ if __name__ == '__main__':
     elif args.loss.use_dual_scale_log_freq:
         loss_func = DLFSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_log_freq_variwindow:
+        loss_func = DLFSVWSLoss(args.loss.fft_min, args.loss.fft_max,
+                            n_fft=args.loss.n_fft, beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
     elif args.loss.use_dual_scale_log_freq_magphase:
         loss_func = DLFSSMPLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, gamma=args.loss.gamma, overlap=args.loss.overlap, device=args.device)

@@ -58,11 +58,11 @@ class Saver(object):
         # self.writer = SummaryWriter(os.path.join(self.expdir, 'logs'))
         
         # accelerator
-        if args.train.accelerator.get('accelerator_project_config'):
+        if args.train.get('accelerator_project_config'):
             project_config = ProjectConfiguration(
                 project_dir=args.env.expdir,
                 logging_dir=os.path.join(args.env.expdir, 'logs'),
-                **args.train.accelerator.get('accelerator_project_config')
+                **args.train.get('accelerator_project_config')
             )
         else:
             project_config = ProjectConfiguration(
