@@ -6,8 +6,11 @@ from torch.nn import functional as F
 from librosa.filters import mel as librosa_mel_fn
 
 
-def variable_hann_window(window_lengh, width=1.0):
-    n = torch.linspace(0.0, 1.0, window_lengh)
+def variable_hann_window(window_length, width=1.0, periodic=True):
+    if periodic:
+        n = torch.arange(window_length) / window_length
+    else:
+        n = torch.linspace(0.0, 1.0, window_length)
     mask = torch.where(n*width + 0.5-width*0.5 < 0.0, 0.0, 1.0)
     mask = mask * torch.where(n*width + 0.5-width*0.5 > 1.0, 0.0, 1.0)
     window = (0.5 + 0.5*torch.cos(2.*torch.pi*(n - 0.5)*width))*mask
@@ -42,7 +45,8 @@ class SSSLoss(nn.Module):
         
         converge_term = torch.mean(torch.linalg.norm(S_true - S_pred, dim = (1, 2)) / torch.linalg.norm(S_true + S_pred, dim = (1, 2)))
         
-        log_term = F.l1_loss(S_true.log(), S_pred.log())
+        # log_term = F.l1_loss(S_true.log(), S_pred.log())
+        log_term = F.l1_loss(S_true, S_pred)
 
         loss = converge_term + self.alpha * log_term
         return loss
@@ -102,7 +106,7 @@ class LF4SLoss(nn.Module):
     Log-Frequency Scaled Single-Scale Spectral Loss. 
     """
 
-    def __init__(self, n_fft=111, alpha=1.0, overlap=0, eps=1e-7, window_fn=torch.hann_window, wkwargs=None):
+    def __init__(self, n_fft=111, alpha=1.0, overlap=0, eps=1e-7, window_fn=torch.hann_window, wkwargs=None, log_freq_clip_min=16):
         super().__init__()
         self.n_fft = n_fft
         self.alpha = alpha
@@ -110,8 +114,10 @@ class LF4SLoss(nn.Module):
         self.hop_length = int(n_fft * (1 - overlap))
         self.spec = torchaudio.transforms.Spectrogram(
             n_fft=self.n_fft, hop_length=self.hop_length, power=1,
-            normalized=True, center=True, window_fn=window_fn, wkwargs=wkwargs)
-        self.log_freq_scale = self.log_frequency_scale(n_fft)[None, :, None]
+            # n_fft=self.n_fft, hop_length=self.hop_length, power=None,
+            normalized=True, center=True, pad_mode='constant', window_fn=window_fn, wkwargs=wkwargs)
+            # normalized=False, center=True, window_fn=window_fn, wkwargs=wkwargs)
+        self.log_freq_scale = self.log_frequency_scale(n_fft, min_clip_bins=log_freq_clip_min)[None, :, None]
         
     def forward(self, x_true, x_pred):
         pad_edges = self.n_fft//2  # half of first/last frame
@@ -119,8 +125,10 @@ class LF4SLoss(nn.Module):
         x_pred_pad = F.pad(x_pred, (pad_edges, pad_edges), mode = 'constant')
         true_spec = self.spec(x_true_pad)
         pred_spec = self.spec(x_pred_pad)
-        S_true = true_spec.abs() * self.log_freq_scale + self.eps
-        S_pred = pred_spec.abs() * self.log_freq_scale + self.eps
+        # S_true = true_spec.abs() * self.log_freq_scale + self.eps
+        # S_pred = pred_spec.abs() * self.log_freq_scale + self.eps
+        S_true = true_spec * self.log_freq_scale + self.eps
+        S_pred = pred_spec * self.log_freq_scale + self.eps
         
         converge_term = torch.mean(torch.linalg.norm(S_true - S_pred, dim = (1, 2)) / torch.linalg.norm(S_true + S_pred, dim = (1, 2)))
         
@@ -134,7 +142,9 @@ class LF4SLoss(nn.Module):
     #     return torch.log2(torch.arange(0, n_fft//2+1) + 2) / torch.log2(torch.tensor(n_fft))
     
     def log_frequency_scale(self, n_fft, min_clip_bins=16):
-        ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft))
+        # ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft))
+        # ret = torch.log2(torch.min(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)), torch.tensor(max_clip_bins)) + 2) / torch.log2(torch.tensor(n_fft//2+1 + 2))
+        ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft//2+1 + 2))
         ret[0] = 1.
         return ret
     
@@ -718,18 +728,65 @@ class DLFSSLoss(nn.Module):
         self.fft_min = fft_min
         self.fft_max = fft_max
         self.lossdict = {}
-        self.lossdict[fft_max] = LF4SLoss(fft_max, alpha, overlap, eps, window_fn=torch.hann_window).to(device)
-        self.lossdict[fft_max-1] = LF4SLoss(fft_max-1, alpha, overlap, eps, window_fn=torch.hann_window).to(device)
-        self.lossdict[fft_min] = LF4SLoss(fft_min, alpha, overlap, eps, window_fn=torch.blackman_window).to(device)
-        self.lossdict[fft_min-1] = LF4SLoss(fft_min-1, alpha, overlap, eps, window_fn=torch.blackman_window).to(device)
+        self.lossdict[fft_max] = LF4SLoss(fft_max, alpha, overlap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_max-1] = LF4SLoss(fft_max-1, alpha, overlap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min] = LF4SLoss(fft_min, alpha, overlap, eps, window_fn=torch.blackman_window, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min-1] = LF4SLoss(fft_min-1, alpha, overlap, eps, window_fn=torch.blackman_window, log_freq_clip_min=12).to(device)
         
     def forward(self, x_pred, x_true):
-        value = 0.
+        # value = 0.
+        # time domain sample loss
+        value = F.l1_loss(x_true, x_pred)
+        
         # choose minus one fft size randomly for frequency bin aliasing
         n_fft_offsets = torch.randint(0, 1, (2,))
         value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
         value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
         return value
+    
+    
+class DSVWSLoss(nn.Module):
+    '''
+    Dual (DFT bin aliased) Scale Variable Windowing Spectral Loss
+    '''
+    
+    def __init__(self, fft_min, fft_max, n_fft=2048, alpha=1.0, beta=0.5, overlap=0, eps=1e-7, device='cuda'):
+        super().__init__()
+        self.beta = beta
+        self.fft_min = fft_min
+        self.fft_max = fft_max
+        self.lossdict = {}
+        max_window_width = n_fft/fft_max
+        max_1_window_width = n_fft/(fft_max-1)
+        min_window_width = n_fft/fft_min
+        min_1_window_width = n_fft/(fft_min-1)
+        max_overwrap = overlap + (1.-overlap)*(1.-1./max_window_width)
+        max_1_overwrap = overlap + (1.-overlap)*(1.-1./max_1_window_width)
+        min_overwrap = overlap + (1.-overlap)*(1.-1./min_window_width)
+        min_1_overwrap = overlap + (1.-overlap)*(1.-1./min_1_window_width)
+        self.lossdict[fft_max] = SSSLoss(n_fft, alpha, max_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_window_width}).to(device)
+        self.lossdict[fft_max-1] = SSSLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_1_window_width}).to(device)
+        self.lossdict[fft_min] = SSSLoss(n_fft, alpha, min_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_window_width}).to(device)
+        self.lossdict[fft_min-1] = SSSLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_1_window_width}).to(device)
+        
+    def forward(self, x_pred, x_true):
+        # value = 0.
+        
+        # time domain sample loss
+        # value = F.l1_loss(x_true, x_pred)*(1.-self.beta)
+        value = F.l1_loss(x_true, x_pred)
+        
+        # choose minus one fft size randomly for frequency bin aliasing
+        n_fft_offsets = torch.randint(0, 1, (2,))
+        value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
+        value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
+        return value
+    
+    def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
+        super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        for loss in self.lossdict.values():
+            loss.to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        return self
     
     
 class DLFSVWSLoss(nn.Module):
@@ -751,18 +808,29 @@ class DLFSVWSLoss(nn.Module):
         max_1_overwrap = overlap + (1.-overlap)*(1.-1./max_1_window_width)
         min_overwrap = overlap + (1.-overlap)*(1.-1./min_window_width)
         min_1_overwrap = overlap + (1.-overlap)*(1.-1./min_1_window_width)
-        self.lossdict[fft_max] = LF4SLoss(n_fft, alpha, max_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_window_width}).to(device)
-        self.lossdict[fft_max-1] = LF4SLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_1_window_width}).to(device)
-        self.lossdict[fft_min] = LF4SLoss(n_fft, alpha, min_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_window_width}).to(device)
-        self.lossdict[fft_min-1] = LF4SLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_1_window_width}).to(device)
+        self.lossdict[fft_max] = LF4SLoss(n_fft, alpha, max_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_window_width}, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_max-1] = LF4SLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_1_window_width}, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min] = LF4SLoss(n_fft, alpha, min_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_window_width}, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min-1] = LF4SLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_1_window_width}, log_freq_clip_min=12).to(device)
         
     def forward(self, x_pred, x_true):
-        value = 0.
+        # value = 0.
+        
+        # time domain sample loss
+        # value = F.l1_loss(x_true, x_pred)*(1.-self.beta)
+        value = F.l1_loss(x_true, x_pred)
+        
         # choose minus one fft size randomly for frequency bin aliasing
         n_fft_offsets = torch.randint(0, 1, (2,))
         value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
         value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
         return value
+    
+    def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
+        super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        for loss in self.lossdict.values():
+            loss.to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        return self
 
 
 class DLFSSMPLoss(nn.Module):
@@ -1852,20 +1920,43 @@ def discriminator_loss(disc_real_outputs, disc_generated_outputs):
         # g_loss_dir = torch.mean(-F.softplus(1 - dg_dir) ** 2.)
         # r_loss_fun = torch.mean((dr_fun - 1) ** 2.)
         # g_loss_fun = torch.mean((dg_fun) ** 2.)
-        r_loss_fun = torch.mean((1 - dr_fun) ** 2.)
-        g_loss_fun = torch.mean((dg_fun) ** 2.)
         # r_loss_fun = torch.mean((1 - dr_fun) ** 2.)
         # g_loss_fun = torch.mean((dg_fun) ** 2.)
+        
+        r_loss_fun = torch.mean((1 - dr_fun) ** 2.)
+        g_loss_fun = torch.mean((dg_fun) ** 2.)
+        # r_g_loss_fun = (torch.mean((dr_fun - 1) ** 2.) + torch.mean((dg_fun + 1) ** 2.))*0.5
+        # r_g_loss_fun = (torch.mean((dr_fun - 1) ** 2.) + torch.mean((dg_fun) ** 2.))*0.5
+        # r_loss_dir = torch.mean(-F.softplus(1 - dr_dir) ** 2.)
+        # g_loss_dir = torch.mean( F.softplus(1 - dg_dir) ** 2.)
         r_loss_dir = torch.mean( F.softplus(1 - dr_dir) ** 2.)
         g_loss_dir = torch.mean(-F.softplus(1 - dg_dir) ** 2.)
+        
+        # # r_loss_fun = torch.mean((1 - dr_fun) ** 2.)
+        # # g_loss_fun = torch.mean((dg_fun) ** 2.)
+        # r_loss_fun = torch.mean((dr_fun - 1) ** 2.)
+        # g_loss_fun = torch.mean((dg_fun) ** 2.)
+        # # r_loss_dir = torch.mean(-F.softplus(1 - dr_dir) ** 2.)
+        # # g_loss_dir = torch.mean( F.softplus(1 - dg_dir) ** 2.)
+        # r_loss_dir = torch.mean( F.softplus(1 - dr_dir) ** 2.)
+        # g_loss_dir = torch.mean(-F.softplus(1 - dg_dir) ** 2.)
+        
+        # r_loss_dir = torch.mean( (dr_dir - 1) ** 2.)
+        # g_loss_dir = torch.mean(-(dg_dir + 1) ** 2.)
+        # r_loss_dir = torch.mean(-(dr_dir))
+        # g_loss_dir = torch.mean( (dg_dir))
         # r_loss_dir = torch.mean((dr_dir - 1) ** 2.)
         # r_loss_dir = torch.mean((1 - dr_dir) ** 2.)
         # g_loss_dir = torch.mean((dg_dir) ** 2.)
         r_loss = r_loss_fun + r_loss_dir
         g_loss = g_loss_fun + g_loss_dir
         loss += r_loss + g_loss
+        # dir_loss = r_loss_dir + g_loss_dir
+        # loss += r_g_loss_fun + dir_loss
         r_losses.append(r_loss.item())
         g_losses.append(g_loss.item())
+        # r_losses.append(dir_loss.item())
+        # g_losses.append(loss.item())
 
     return loss, r_losses, g_losses
 
@@ -1878,7 +1969,9 @@ def generator_loss(disc_outputs):
         dg = dg.float()
         # l = torch.mean(F.softplus(1 - dg) ** 2.)
         # l = torch.mean((dg - 1) ** 2.)
+        # l = torch.mean((dg - 1) ** 2.)*0.5
         l = torch.mean((1 - dg) ** 2.)
+        # l = torch.mean(dg ** 2.)
         gen_losses.append(l)
         loss += l
 

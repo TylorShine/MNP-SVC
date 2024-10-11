@@ -520,9 +520,9 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # else:
                 #     with autocast(device_type=args.device, dtype=dtype):
                 with accelerator.autocast():
-                    # signal = model(units.to(dtype), f0, volume, data[spk_id_key],
+                    signal = model(units.to(dtype), f0, volume, data[spk_id_key])
                     #                             infer=False)
-                    signal = model(units, f0, volume, data[spk_id_key])
+                    # signal = model(units, f0, volume, data[spk_id_key])
                                                 # infer=False)
                                             # aug_shift=data['aug_shift'], infer=False)
                                             
@@ -536,7 +536,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # torch.compiler.cudagraph_mark_step_begin()
                 # with autocast(device_type=args.device, dtype=dtype):
                 with accelerator.autocast():
-                    d_signal_real, d_signal_gen, _, _ = model_d(audio.unsqueeze(1), signal.detach().unsqueeze(1), flg_train=True)
+                    d_signal_real, d_signal_gen, _, _ = model_d(audio.to(dtype).unsqueeze(1), signal.detach().to(dtype).unsqueeze(1), flg_train=True)
                     
                 # discriminator loss
                 loss_d, losses_d_real, losses_d_gen = discriminator_loss(d_signal_real, d_signal_gen)
@@ -555,7 +555,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                     #     scaler.unscale_(optimizer_d)
                     #     torch.nn.utils.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
                     #     scaler.step(optimizer_d)
-                    accelerator.backward(loss_d)
+                    accelerator.backward(loss_d*0.5)
                     if accelerator.sync_gradients:
                         accelerator.clip_grad_norm_(parameters=model_d.parameters(), max_norm=500)
                     optimizer_d.step()
@@ -564,7 +564,7 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # generator loss
                 # with autocast(device_type=args.device, dtype=dtype):
                 with accelerator.autocast():
-                    d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio.unsqueeze(1), signal.unsqueeze(1))
+                    d_signal_real, d_signal_gen, fmap_real, fmap_gen = model_d(audio.to(dtype).unsqueeze(1), signal.to(dtype).unsqueeze(1))
                     
                 loss_fm = feature_loss(fmap_real, fmap_gen)
                 loss_gen, losses_gen = generator_loss(d_signal_gen)
@@ -575,7 +575,12 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # losses = [loss_gen*0.25, loss_fm*0.01]    # TODO: parametrize
                 # losses = [loss_gen*0.25, loss_fm*0.1]    # TODO: parametrize
                 # losses = [loss_gen*0.5, loss_fm*0.2]    # TODO: parametrize
-                losses = [loss_gen*0.3, loss_fm*0.15]    # TODO: parametrize
+                # losses = [loss_gen*0.5, loss_fm*0.02]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm*0.1]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm*2.]    # TODO: parametrize
+                losses = [loss_gen, loss_fm*1.5]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm*1.25]    # TODO: parametrize
             else:
                 optimizer.zero_grad()
                 losses = []
@@ -592,8 +597,20 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # audio = audio[:,:min_len]
                 # with accelerator.autocast():
                 # losses.append(loss_func(signal, audio)*2.)
-                with accelerator.autocast():
-                    losses.append(loss_func(signal, audio)*5.)
+                if model_d is not None:
+                    with accelerator.autocast():
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*24.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*16.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*13.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*12.)
+                        losses.append(loss_func(signal.to(dtype), audio.to(dtype))*11.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*8.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*5.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*10.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*3.)
+                else:
+                    with accelerator.autocast():
+                        losses.append(loss_func(signal.to(dtype), audio.to(dtype)))
             
             loss = torch.stack(losses).sum()
             

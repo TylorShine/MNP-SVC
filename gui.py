@@ -738,7 +738,8 @@ def parse_args(args=None, namespace=None):
         "--extra_time",
         type=float,
         # default=1.5,
-        default=0.,
+        # default=0.,
+        default=0.8,
     )
     parser.add_argument(
        "-pb" ,

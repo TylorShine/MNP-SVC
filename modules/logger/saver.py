@@ -181,7 +181,7 @@ class Saver(object):
                     self.expdir , 'states', f'cp{maxstep}')
 
                 # load states
-                self.accelerator.load_state(path_state)
+                self.accelerator.load_state(path_state, strict=False)
                 self.accelerator.step = maxstep
                 self.set_global_step(maxstep)
 

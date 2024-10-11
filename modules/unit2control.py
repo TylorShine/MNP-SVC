@@ -123,6 +123,7 @@ class Unit2ControlGE2E(nn.Module):
         # feature reconstructor
         self.recon = nn.Sequential(
             ConvNeXtV2GLULikeEncoder(
+            # ConvNeXtV2LikeEncoder(
                 # num_layers=3,
                 num_layers=2,
                 dim_model=conv_stack_middle_size,

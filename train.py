@@ -17,7 +17,7 @@ from modules.discriminator import (
 )
 from modules.loss import (
     RSSLoss, DSSLoss, DLFSSLoss,
-    DLFSVWSLoss,
+    DSVWSLoss, DLFSVWSLoss,
     DLFSSMPLoss, DLFSSMPMalLoss, DSMPMalLoss,
     DLFSSMPMalinblogsLoss, DLFSSMalinblogsLoss, MRLFSSMPMalinblogsLoss, MRSMPMalinblogsLoss,
     MRSMPL1Loss, MRLF4SMPMalinblogsLoss, MRRSMalinblogsLoss,
@@ -50,6 +50,11 @@ if __name__ == '__main__':
     print(' >    exp:', args.env.expdir)
     
     vocoder = None
+    
+    if args.train.allow_tf32:
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
+        torch.set_float32_matmul_precision('high')
 
     # load model
     model = None
@@ -87,7 +92,6 @@ if __name__ == '__main__':
                 use_pitch_aug=args.model.use_pitch_aug,
                 noise_seed=args.model.noise_seed,
                 )
-            # torch.set_float32_matmul_precision('high')
             # model.unit2ctrl.compile()
             model.unit2ctrl.compile(mode="reduce-overhead")
             if args.model.use_discriminator:
@@ -364,7 +368,7 @@ if __name__ == '__main__':
     
     # model.unit2ctrl.compile(backend="onnxrt")
     # load model parameters
-    optimizer = torch.optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay)
+    optimizer = torch.optim.AdamW(model.parameters(), lr=args.train.lr, weight_decay=args.train.weight_decay/args.train.lr)
     # model.unit2ctrl = torch.compile(model.unit2ctrl, mode="reduce-overhead")
     # model.unit2ctrl.compile(mode="reduce-overhead")
     
@@ -395,8 +399,8 @@ if __name__ == '__main__':
         # else:
         #     scheduler._last_lr = (lr,)
     else:
-        # scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
+        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+        # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
     
         
         
@@ -404,6 +408,9 @@ if __name__ == '__main__':
     if args.loss.use_dual_scale:
         loss_func = DSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_dual_scale_variwindow:
+        loss_func = DSVWSLoss(args.loss.fft_min, args.loss.fft_max,
+                              n_fft=args.loss.n_fft, beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
     elif args.loss.use_dual_scale_log_freq:
         loss_func = DLFSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
@@ -451,7 +458,7 @@ if __name__ == '__main__':
         
     if args.model.use_discriminator:
         # load discriminator model parameters
-        optimizer_d = torch.optim.AdamW(model_d.parameters(), lr=args.train.lr*0.5, weight_decay=args.train.weight_decay)
+        optimizer_d = torch.optim.AdamW(model_d.parameters(), lr=args.train.lr*0.5, weight_decay=args.train.weight_decay/args.train.lr)
         # model_d = torch.compile(model_d, mode="reduce-overhead")
         # model_d.compile(backend="onnxrt")
         
@@ -470,7 +477,8 @@ if __name__ == '__main__':
         # scheduler_d = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer_d, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
         #                                                          threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
         #                                                          cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-        scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*0.5)
+        # scheduler_d = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer_d, T_max=args.train.epochs, eta_min=args.train.sched_min_lr*0.5)
+        scheduler_d = torch.optim.lr_scheduler.ExponentialLR(optimizer_d, gamma=args.train.sched_gamma)
     
         # if states is not None:
         #     sched_states = states.get('scheduler')
