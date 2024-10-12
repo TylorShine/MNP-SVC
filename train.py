@@ -17,6 +17,7 @@ from modules.discriminator import (
 )
 from modules.loss import (
     RSSLoss, DSSLoss, DLFSSLoss,
+    MLFSSLoss,
     DSVWSLoss, DLFSVWSLoss,
     DLFSSMPLoss, DLFSSMPMalLoss, DSMPMalLoss,
     DLFSSMPMalinblogsLoss, DLFSSMalinblogsLoss, MRLFSSMPMalinblogsLoss, MRSMPMalinblogsLoss,
@@ -383,23 +384,23 @@ if __name__ == '__main__':
     #     param_group['lr'] = lr
     #     param_group['weight_decay'] = args.train.weight_decay
         
-    if args.train.only_u2c_stack:
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
-    elif not args.model.use_discriminator:
-        scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
-                                                            threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
-                                                            cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
-        # if states is not None:
-        #     sched_states = states.get('scheduler')
-        #     if sched_states is not None:
-        #         scheduler.best = sched_states['best']
-        #         scheduler.cooldown_counter = sched_states['cooldown_counter']
-        #         scheduler.num_bad_epochs = sched_states['num_bad_epochs']
-        #         scheduler._last_lr = sched_states['_last_lr']
-        # else:
-        #     scheduler._last_lr = (lr,)
-    else:
-        scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+    # if args.train.only_u2c_stack:
+    #     scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
+    # elif not args.model.use_discriminator:
+    #     scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='min', factor=args.train.sched_factor, patience=args.train.sched_patience,
+    #                                                         threshold=args.train.sched_threshold, threshold_mode=args.train.sched_threshold_mode,
+    #                                                         cooldown=args.train.sched_cooldown, min_lr=args.train.sched_min_lr)
+    #     # if states is not None:
+    #     #     sched_states = states.get('scheduler')
+    #     #     if sched_states is not None:
+    #     #         scheduler.best = sched_states['best']
+    #     #         scheduler.cooldown_counter = sched_states['cooldown_counter']
+    #     #         scheduler.num_bad_epochs = sched_states['num_bad_epochs']
+    #     #         scheduler._last_lr = sched_states['_last_lr']
+    #     # else:
+    #     #     scheduler._last_lr = (lr,)
+    # else:
+    scheduler = torch.optim.lr_scheduler.ExponentialLR(optimizer, gamma=args.train.sched_gamma)
         # scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.train.epochs, eta_min=args.train.sched_min_lr)
     
         
@@ -408,6 +409,9 @@ if __name__ == '__main__':
     if args.loss.use_dual_scale:
         loss_func = DSSLoss(args.loss.fft_min, args.loss.fft_max,
                             beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)
+    elif args.loss.use_multi_scale_log_freq:
+        loss_func = MLFSSLoss(n_ffts=args.loss.n_ffts, beta=args.loss.beta,
+                              overlap=args.loss.overlap, device=args.device)
     elif args.loss.use_dual_scale_variwindow:
         loss_func = DSVWSLoss(args.loss.fft_min, args.loss.fft_max,
                               n_fft=args.loss.n_fft, beta=args.loss.beta, overlap=args.loss.overlap, device=args.device)

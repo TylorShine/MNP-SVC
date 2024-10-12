@@ -808,22 +808,71 @@ class DLFSVWSLoss(nn.Module):
         max_1_overwrap = overlap + (1.-overlap)*(1.-1./max_1_window_width)
         min_overwrap = overlap + (1.-overlap)*(1.-1./min_window_width)
         min_1_overwrap = overlap + (1.-overlap)*(1.-1./min_1_window_width)
-        self.lossdict[fft_max] = LF4SLoss(n_fft, alpha, max_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_window_width}, log_freq_clip_min=12).to(device)
-        self.lossdict[fft_max-1] = LF4SLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_1_window_width}, log_freq_clip_min=12).to(device)
-        self.lossdict[fft_min] = LF4SLoss(n_fft, alpha, min_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_window_width}, log_freq_clip_min=12).to(device)
-        self.lossdict[fft_min-1] = LF4SLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_1_window_width}, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_max] = LF4SLoss(n_fft, alpha, max_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_window_width}, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_max-1] = LF4SLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': max_1_window_width}, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_min] = LF4SLoss(n_fft, alpha, min_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_window_width}, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_min-1] = LF4SLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=variable_hann_window, wkwargs={'width': min_1_window_width}, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_max] = LF4SLoss(n_fft, alpha, max_overwrap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        # self.lossdict[fft_max-1] = LF4SLoss(n_fft-1, alpha, max_1_overwrap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min] = LF4SLoss(n_fft, alpha, min_overwrap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        self.lossdict[fft_min-1] = LF4SLoss(n_fft-1, alpha, min_1_overwrap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
         
     def forward(self, x_pred, x_true):
         # value = 0.
         
         # time domain sample loss
         # value = F.l1_loss(x_true, x_pred)*(1.-self.beta)
+        # value = F.l1_loss(x_true, x_pred)*self.beta
         value = F.l1_loss(x_true, x_pred)
         
         # choose minus one fft size randomly for frequency bin aliasing
         n_fft_offsets = torch.randint(0, 1, (2,))
-        value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
-        value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
+        # value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
+        # value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
+        # # value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)
+        value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*self.beta
+        return value
+    
+    def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
+        super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        for loss in self.lossdict.values():
+            loss.to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        return self
+    
+    
+class MLFSSLoss(nn.Module):
+    '''
+    Multiple Log-Frequency Scaled Spectral Loss
+    '''
+    
+    def __init__(self, n_ffts=[32, 64, 128, 256, 512, 1024, 2048], alpha=1.0, beta=0.5, overlap=0, eps=1e-7, device='cuda'):
+        super().__init__()
+        self.beta = beta
+        self.lossdict = {}
+        self.n_ffts = n_ffts
+        for n in n_ffts:
+            # max_window_width = n_fft/n
+            # max_overwrap = overlap + (1.-overlap)*(1.-1./max_window_width)
+            self.lossdict[n] = LF4SLoss(n, alpha, overlap, eps, window_fn=torch.hann_window, log_freq_clip_min=12).to(device)
+        
+    def forward(self, x_pred, x_true):
+        # value = 0.
+        
+        # time domain sample loss
+        # value = F.l1_loss(x_true, x_pred)*(1.-self.beta)
+        # value = F.l1_loss(x_true, x_pred)*self.beta
+        value = F.l1_loss(x_true, x_pred)
+        
+        # # choose minus one fft size randomly for frequency bin aliasing
+        # n_fft_offsets = torch.randint(0, 1, (2,))
+        # # value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*(1. - self.beta)
+        # # value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)*self.beta
+        # # # value += self.lossdict[self.fft_max-int(n_fft_offsets[1])](x_true, x_pred)
+        # value += self.lossdict[self.fft_min-int(n_fft_offsets[0])](x_true, x_pred)*self.beta
+        
+        for n in self.n_ffts:
+            value += self.lossdict[n](x_true, x_pred)*self.beta/len(self.n_ffts)
+        
         return value
     
     def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
