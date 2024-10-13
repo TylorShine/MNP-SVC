@@ -10,7 +10,7 @@ SET DPHUBERT_DIR=https://huggingface.co/pyf98/DPHuBERT/resolve/main/DPWavLM-sp0.
 SET DPHUBERT_FILE=DPWavLM-sp0.75.pth
 SET DPHUBERT_BIN=%DOWNLOAD_MODEL_DIR%\dphubert\%DPHUBERT_FILE%
 IF NOT EXIST "%DPHUBERT_BIN%" (
-    ECHO Info: Start downloading the DPHuBERT (DPWavLM) model...
+    ECHO Info: Start downloading the DPHuBERT DPWavLM model...
     ECHO .
     curl -L -o "%DPHUBERT_BIN%" "%DPHUBERT_DIR%"
     IF %ERRORLEVEL% neq 0 (
@@ -145,3 +145,4 @@ IF NOT EXIST "%MNP_VCTK_DIR%" (
 ECHO.
 ECHO Info: All nececssary models downloaded successfully!
 ECHO.
+pause
