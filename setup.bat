@@ -6,7 +6,8 @@ IF NOT EXIST "%DOWNLOAD_CACHE_DIR%" mkdir "%DOWNLOAD_CACHE_DIR%"
 
 
 @REM download Micromamba
-SET MAMBA_DIR=https://micro.mamba.pm/api/micromamba/win-64/latest
+@REM SET MAMBA_DIR=https://micro.mamba.pm/api/micromamba/win-64/latest
+SET MAMBA_DIR=https://github.com/mamba-org/micromamba-releases/releases/download/1.5.10-0/micromamba-win-64.tar.bz2
 SET MAMBA_FILE=micromamba.tar.bz2
 SET MAMBA_BIN=%DOWNLOAD_CACHE_DIR%\%MAMBA_FILE%
 IF NOT EXIST "%MAMBA_BIN%" (
@@ -97,7 +98,7 @@ ECHO Info: Update pip...
 python -m pip install -U pip
 
 @REM install torch
-SET TORCH_INSTALL_CMD=uv pip install torch torchvision torchaudio --pre --index-url https://download.pytorch.org/whl/nightly/cu121
+SET TORCH_INSTALL_CMD=uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
 SET TORCH_PACKAGE=torch
 uv pip show torch > NUL
 IF %ERRORLEVEL% neq 0 (
@@ -109,7 +110,7 @@ IF %ERRORLEVEL% neq 0 (
 @REM install requirements
 ECHO.
 ECHO Info: Check install requirements...
-uv pip install -r requirements.txt
+uv pip install -r requirements/main.txt
 
 
 ECHO.
