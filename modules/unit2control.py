@@ -227,17 +227,7 @@ class Unit2ControlGE2E(nn.Module):
                     
             recon_spk_emb = self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size)
                 
-        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + self.recon_spk_embed(spk_id).unsqueeze(1).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size))
-        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.7071*(1. if infer else 0.))
-        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
-        # x = x + self.recon[-1](recon)
-        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.05)
-        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*0.01)
-        # recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb + torch.randn_like(recon_spk_emb)*(2./3.))
-        # recon = self.recon[0](self.stack(units.transpose(2, 1) + torch.randn_like(units.transpose(2, 1))*(2./3.)) + recon_spk_emb)
-        # recon = self.recon[0](self.stack(units.transpose(2, 1) + torch.randn_like(units.transpose(2, 1))*0.05) + recon_spk_emb)
         recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb)
-        # recon = self.recon[0](self.stack(units.transpose(2, 1)))
         x = x + self.recon[1](recon)
         
         x = self.decoder(x)
@@ -316,11 +306,6 @@ class Unit2ControlGE2E_export(Unit2ControlGE2E):
         recon_spk_emb = torch.sum(
             self.recon_spk_embed(spk_id).expand(x.shape[0], x.shape[1], self.conv_stack_middle_size) *
             spk_mix.repeat(1, x.shape[1], self.conv_stack_middle_size), dim=0)
-        
-        # x = x + self.stack(units.transpose(2, 1)) + recon_spk_embed
-                
-        # recon = self.recon[:-1](self.stack(units.transpose(2, 1)) + recon_spk_emb)
-        # x = x + self.recon[-1](recon)
         
         recon = self.recon[0](self.stack(units.transpose(2, 1)) + recon_spk_emb)
         x = x + self.recon[1](recon)

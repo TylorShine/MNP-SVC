@@ -120,43 +120,6 @@ class ConvNeXtV2GLULikeBlock(nn.Module):
         x1 = self.model_1(x)
         return x + self.model_3(self.model_2_1(x1) * self.model_2_2(x1))
 
-
-# class ConvNeXtV2GLULikeBlock(nn.Module):
-#     def __init__(self, dim, kernel_size=5, dilation=1, bottoleneck_dilation=4):
-#         super().__init__()
-#         self.bottoleneck_dilation = bottoleneck_dilation
-#         padding = (kernel_size - 1) * dilation // 2
-#         self.model_1 = nn.Sequential(
-#             nn.Conv1d(dim, dim, kernel_size, 1, padding,
-#                             dilation=dilation, groups=dim),
-#             Transpose((2, 1)),
-#             nn.LayerNorm(dim, eps=1e-6),
-#             nn.Linear(dim, dim * bottoleneck_dilation),
-#             nn.CELU(),
-#             GRN(dim * bottoleneck_dilation),
-#         )
-#         self.model_2_1 = nn.ModuleList(
-#             nn.Linear(dim * bottoleneck_dilation // 2, dim//bottoleneck_dilation) for _ in range(bottoleneck_dilation)
-#         )
-#         self.model_2_2 = nn.ModuleList(
-#             nn.Sequential(
-#                 nn.Linear(dim * bottoleneck_dilation // 2, dim//bottoleneck_dilation),
-#                 nn.CELU(),
-#             ) for _ in range(bottoleneck_dilation)
-#         )
-#         self.model_3 = nn.Sequential(
-#             Cat(-1),
-#             Transpose((2, 1)),
-#         )
-
-#     def forward(self, x):
-#         x1 = self.model_1(x)
-#         xd = x1.view(x1.shape[0], x1.shape[1], 2, -1)
-#         xs = []
-#         for m2_1, m2_2 in zip(self.model_2_1, self.model_2_2):
-#             xs.append(m2_1(xd[:, :, 0, :]) * m2_2(xd[:, :, 1, :]))
-#         return x + self.model_3(xs)
-    
     
 class ConvNeXtV2GLULikeEncoder(nn.Module):
     def __init__(self, num_layers, dim_model, kernel_size=5, dilation=1, bottoleneck_dilation=4):

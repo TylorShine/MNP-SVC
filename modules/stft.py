@@ -64,33 +64,18 @@ def window_sumsquare(window, n_frames, hop_length=200, win_length=800,
         win_length = n_fft
 
     n = n_fft + hop_length * (n_frames - 1)
-    # x = np.zeros(n, dtype=dtype)
     x = torch.zeros(n, dtype=dtype)
 
-    # # Compute the squared window at the desired length
-    # win_sq = get_window(window, win_length, fftbins=True)
-    # win_sq = get_window('hann', win_length, fftbins=True)
-    # win_sq = librosa_util.normalize(win_sq, norm=norm)**2
-    # win_sq = librosa_util.pad_center(win_sq, size=n_fft)
-    
-    # win_sq = torch.from_numpy(win_sq)
-    
-    # # win_sq = F.normalize(window, p=torch.inf, dim=0)**2
-    # # win_sq = F.normalize(window, p=None, dim=0)**2
-    # win_sq = window**2
+    # Compute the squared window at the desired length
     win_sq = F.normalize(window, p=torch.inf, dim=0)**2
-    # print(window, win_sq.shape, n_fft, win_length, ((n_fft - win_length)//2, n_fft - win_length - (n_fft - win_length)//2))
+    
     win_sq = F.pad(win_sq.unsqueeze(0), ((n_fft - win_length)//2, n_fft - win_length - (n_fft - win_length)//2), mode='constant', value=0).squeeze(0)
-    # win_sq = F.pad(win_sq.unsqueeze(0), ((n_fft - win_length)//2, n_fft - win_length - (n_fft - win_length)//2), mode='reflect', value=0).squeeze(0)
 
     n_tensor = torch.tensor(n, dtype=torch.long)
     n_fft_tensor = torch.tensor(n_fft, dtype=torch.long)
     # Fill the envelope
     for i in range(n_frames):
         sample = i * hop_length
-        # x[sample:min(n, sample + n_fft)] += win_sq[:max(0, min(n_fft, n - sample))]
-        # sample_end = min(n, sample + n_fft)
-        # win_sq_len = max(0, min(n_fft, n - sample))
         
         sample_end = torch.where(n_tensor < sample + n_fft_tensor,  n_tensor, sample + n_fft_tensor)
         win_sq_len = torch.where(n_fft_tensor < n_tensor - sample, n_fft_tensor, n_tensor - sample)

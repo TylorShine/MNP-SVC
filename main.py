@@ -193,12 +193,6 @@ if __name__ == '__main__':
         device = 'cpu'  # TODO: change device by onnx session providers
         model = lambda units, f0, volume, spk_id, spk_mix: model_.run(
             ['signal'],
-            # {
-            #     'units_frames': units.cpu().numpy(),
-            #     'f0_frames': f0.cpu().numpy(),
-            #     'volume_frames': volume.cpu().numpy(),
-            #     'spk_id': spk_id.cpu().numpy(),
-            #     'spk_mix': spk_mix.cpu().numpy()})[0]
             {
                 'units_frames': units.cpu().numpy(),
                 'f0_frames': f0.cpu().numpy(),

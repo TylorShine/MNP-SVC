@@ -48,15 +48,6 @@ class Saver(object):
         # makedirs
         os.makedirs(self.expdir, exist_ok=True)
 
-        # # path
-        # self.path_log_info = os.path.join(self.expdir, 'log_info.txt')
-
-        # # ckpt
-        # os.makedirs(self.expdir, exist_ok=True)
-
-        # # writer
-        # self.writer = SummaryWriter(os.path.join(self.expdir, 'logs'))
-        
         # accelerator
         if args.train.get('accelerator_project_config'):
             project_config = ProjectConfiguration(
@@ -70,8 +61,6 @@ class Saver(object):
                 logging_dir=os.path.join(args.env.expdir, 'logs')
             )
         self.accelerator = Accelerator(
-            # mixed_precision=args.train.accelerator.mixed_precision,
-            # log_with=args.train.accelerator.log_with,
             project_config=project_config,
             **args.train.accelerator,
         )
@@ -118,19 +107,12 @@ class Saver(object):
         # display
         self.accelerator.print(msg_str, end=end)
         
-        # msg_str = msg_str.lstrip('\r')
-
-        # # save
-        # with open(self.path_log_info, 'a') as fp:
-        #     fp.write(msg_str+'\n')
 
     def log_value(self, dict):
         self.accelerator.log(
             dict,
             step=self.global_step,
         )
-        # for k, v in dict.items():
-        #     self.writer.add_scalar(k, v, self.global_step)
     
     def log_spec(self, name, spec, spec_out, vmin=-14, vmax=3.5):  
         spec_cat = torch.cat([(spec_out - spec).abs() + vmin, spec, spec_out], -1)
@@ -195,14 +177,6 @@ class Saver(object):
     def load_from_pretrained(self,
                              model,
                              optimizer):
-        # path = os.path.join(self.expdir, name+postfix)
-        # path_pt = glob.glob(os.path.join(
-        #     self.expdir, f'{name}{postfix}*.pt'))
-        # if len(path_pt) > 0:
-        #     steps = [os.path.basename(s).rstrip('.pt').lstrip(f'{name}{postfix}') for s in path_pt]
-        #     maxstep = max([int(s) if s.isdigit() else -1 for s in steps])
-        #     if maxstep >= 0:
-        #         path_pt = f'{path}{maxstep}.pt'
         if os.path.isfile(self.pretrained):
             # # load states
             # self.accelerator.load_state(path_pt)                
@@ -266,8 +240,7 @@ class Saver(object):
         # path
         if postfix != '_':
             postfix = postfix
-        # path_pt = os.path.join(
-        #     self.expdir , name+postfix+'.pt')
+        
         path_pt = os.path.join(
             self.expdir , name+postfix)
         
@@ -285,19 +258,6 @@ class Saver(object):
         # copy spk_info
         path_spk = os.path.join(self.expdir, 'spk_info.npz')
         shutil.copy2(path_spk, os.path.join(self.expdir, name+postfix, 'spk_info.npz'))
-
-        # # save
-        # save_model = {
-        #     'global_step': self.global_step,
-        #     'global_epoch': self.global_epoch,
-        #     'model': model.state_dict(),
-        # }
-        
-        # if states is not None:
-        #     save_model['states'] = states
-        # if optimizer is not None:
-        #     save_model['optimizer'] = optimizer.state_dict()
-        # torch.save(save_model, path_pt)
         
         # # check
         # print(' [*] model checkpoint saved: {}'.format(path_pt))
