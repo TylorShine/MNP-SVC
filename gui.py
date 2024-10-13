@@ -196,6 +196,7 @@ class Config:
         self.samplerate = 44100  # Hz
         # self.block_time = 0.3  # s
         self.block_time = 64  # frames
+        self.sub_block_size = 32
         self.f_pitch_change: float = 0.0  # float(request_form.get("fPitchChange", 0))
         self.f_intonation: float = 1.0
         self.f_intonation_base: float = 200.0
@@ -300,17 +301,20 @@ class GUI:
                 sg.Frame(layout=[
                     [sg.Text(i18n("音频切分大小")),
                     #  sg.Slider(range=(0.05, 3.0), orientation='h', key='block', resolution=0.01, default_value=0.3,
-                     sg.Slider(range=(1, 256), orientation='h', key='block', resolution=1, default_value=50,
+                     sg.Slider(range=(32, 320), orientation='h', key='block', resolution=1, default_value=50,
+                               enable_events=True)],
+                    [sg.Text(i18n("音频切分子分割大小")),
+                     sg.Slider(range=(1, 32), orientation='h', key='block_div', resolution=1, default_value=1,
                                enable_events=True)],
                     [sg.Text(i18n("交叉淡化时长")),
                     #  sg.Slider(range=(0.0, 0.15), orientation='h', key='crossfade', resolution=0.005,
                     #            default_value=0.04, enable_events=True)],
                                 # default_value=0.0, enable_events=True)],
                      sg.Slider(range=(0.0, 0.5), orientation='h', key='crossfade', resolution=0.005,
-                               default_value=0.04, enable_events=True)],
+                               default_value=0.03, enable_events=True)],
                     [sg.Text(i18n("额外推理时长")),
                     #  sg.Slider(range=(0.05, 5), orientation='h', key='extra', resolution=0.01, default_value=2.0,
-                     sg.Slider(range=(0.0, 5.), orientation='h', key='extra', resolution=0.01, default_value=1.0,
+                     sg.Slider(range=(0.0, 5.), orientation='h', key='extra', resolution=0.01, default_value=0.8,
                                enable_events=True)],
                     [sg.Text(i18n("f0预测模式")),
                      sg.Combo(values=self.f0_mode_list, key='f0_mode', default_value=self.f0_mode_list[-1],
@@ -398,17 +402,21 @@ class GUI:
         self.config.select_pitch_extractor = values['f0_mode']
         self.config.use_phase_vocoder = values['use_phase_vocoder']
         self.config.use_spk_mix = values['spk_mix']
+        self.config.sub_block_size = int(values['block_div'])
         self.block_frame = int(self.config.block_time * self.svc_model.args.data.block_size + 0.5)
+        # self.callback_blocksize = max(self.block_frame//16, self.svc_model.args.data.block_size)
+        # self.callback_blocksize = max(self.block_frame//16, 1)
+        self.callback_blocksize = max(self.block_frame//self.config.sub_block_size, 1)
         # self.crossfade_frame = int(self.config.crossfade_time * self.config.samplerate)
         self.crossfade_frame = int(self.config.crossfade_time * self.block_frame + 0.5)
-        self.sola_search_frame = int(0.01 * self.config.samplerate)
-        self.last_delay_frame = int(0.02 * self.config.samplerate)
+        self.sola_search_frame = int(0.005 * self.config.samplerate)
+        self.last_delay_frame = int(0.01 * self.config.samplerate)
         # self.last_delay_frame = 1
         self.extra_frame = int(self.config.extra_time * self.config.samplerate)
         self.input_frame = max(
             self.block_frame + self.crossfade_frame + self.sola_search_frame + 2 * self.last_delay_frame,
             self.block_frame + self.extra_frame)
-        self.f_safe_prefix_pad_length = self.config.extra_time - self.config.crossfade_time - 0.01 - 0.02
+        self.f_safe_prefix_pad_length = self.config.extra_time - self.config.crossfade_time - 0.005 - 0.01
 
     def update_values(self):
         self.window['sg_model'].update(self.config.checkpoint_path)
@@ -422,6 +430,7 @@ class GUI:
         self.window['samplerate'].update(self.config.samplerate)
         self.window['spk_mix'].update(self.config.use_spk_mix)
         self.window['block'].update(self.config.block_time)
+        self.window['block_div'].update(self.config.sub_block_size)
         self.window['crossfade'].update(self.config.crossfade_time)
         self.window['extra'].update(self.config.extra_time)
         self.window['f0_mode'].update(self.config.select_pitch_extractor)
@@ -429,7 +438,7 @@ class GUI:
     def update_spk(self, spk_id):
         self.config.spk_id = int(spk_id)
         if self.svc_model.spk_embeds is not None:
-            if spk_id not in self.svc_model.spk_embeds:
+            if str(spk_id) not in self.svc_model.spk_embeds.keys():
                 self.config.spk_id = int(list(self.svc_model.spk_embeds.keys())[0])
             self.window['spk_name'].update(self.svc_model.spk_embeds[str(self.config.spk_id)]['spk_name'])
         else:
@@ -466,7 +475,10 @@ class GUI:
             self.stream = sd.Stream(
                 channels=2,
                 callback=self.audio_callback,
-                blocksize=self.block_frame,
+                # blocksize=self.block_frame,
+                # blocksize=max(self.block_frame//8, 32),
+                blocksize=self.callback_blocksize,
+                latency='low',
                 samplerate=self.config.samplerate,
                 dtype="float32")
             self.stream.start()
@@ -486,9 +498,11 @@ class GUI:
         '''
         start_time = time.perf_counter()
         # print("\nStarting callback")
-        # self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
-        self.input_wav[:] = np.roll(self.input_wav, -self.block_frame)
-        self.input_wav[-self.block_frame:] = librosa.to_mono(indata.T)
+        
+        block_size = frames
+        
+        self.input_wav[:] = np.roll(self.input_wav, -block_size)
+        self.input_wav[-block_size:] = librosa.to_mono(indata.T)
 
         # infer
         _audio, _model_sr = self.svc_model.infer(
@@ -520,8 +534,10 @@ class GUI:
                 self.resample_kernel[key_str] = Resample(_model_sr, self.config.samplerate,
                                                          lowpass_filter_width=128).to(self.device)
             _audio = self.resample_kernel[key_str](_audio)
+        # temp_wav = _audio[
+        #            - self.callback_blocksize - self.crossfade_frame - self.sola_search_frame - self.last_delay_frame: - self.last_delay_frame]
         temp_wav = _audio[
-                   - self.block_frame - self.crossfade_frame - self.sola_search_frame - self.last_delay_frame: - self.last_delay_frame]
+                   - block_size - self.crossfade_frame - self.sola_search_frame - self.last_delay_frame: - self.last_delay_frame]
         # temp_wav = _audio[:self.block_frame + self.crossfade_frame + self.sola_search_frame]
         # temp_wav = _audio[self.input_wav.shape[0] - self.block_frame - self.crossfade_frame - self.sola_search_frame:]
         
@@ -537,7 +553,9 @@ class GUI:
             sola_shift = torch.argmax(cor_nom[0, 0] / cor_den[0, 0])
             # else:
             #     sola_shift = 0
-            temp_wav = temp_wav[sola_shift: sola_shift + self.block_frame + self.crossfade_frame]
+            # temp_wav = temp_wav[sola_shift: sola_shift + self.block_frame + self.crossfade_frame]
+            # temp_wav = temp_wav[sola_shift: sola_shift + self.callback_blocksize + self.crossfade_frame]
+            temp_wav = temp_wav[sola_shift: sola_shift + block_size + self.crossfade_frame]
             print(f'\rsola_shift: {int(sola_shift):4}', end="")
         else:
             print(f'\rsola_shift: {0:4}', end="")
@@ -558,7 +576,8 @@ class GUI:
 
             outdata[:] = temp_wav[: - self.crossfade_frame, None].repeat(1, 2).cpu().numpy()
         else:
-            outdata[:] = _audio[: self.block_frame, None].repeat(1, 2).cpu().numpy()
+            # outdata[:] = _audio[: self.block_frame, None].repeat(1, 2).cpu().numpy()
+            outdata[:] = _audio[: block_size, None].repeat(1, 2).cpu().numpy()
         end_time = time.perf_counter()
         print(f' infer_time: {end_time - start_time:.5f}', end="")
         if flag_vc:

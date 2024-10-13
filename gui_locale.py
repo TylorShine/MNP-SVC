@@ -37,6 +37,7 @@ LANGUAGE_ALL = {
         '推理所用时间(ms):': '推理所用时间(ms):',
         '抑扬': '抑扬',
         '抑扬基(Hz)': '抑扬基(Hz)',
+        '音频切分子分割大小': '音频切分子分割大小',
     },
     'en_US': {
         'SUPER': 'zh_CN',
@@ -70,6 +71,7 @@ LANGUAGE_ALL = {
         '推理所用时间(ms):': 'Inference time(ms):',
         '抑扬': 'Intonation',
         '抑扬基(Hz)': 'Intonation base(Hz)',
+        '音频切分子分割大小': 'Subsegmentation size',
     },
     'ja_JP': {
         'SUPER': 'zh_CN',
@@ -103,6 +105,7 @@ LANGUAGE_ALL = {
         '推理所用时间(ms):': '推論時間(ms):',
         '抑扬': '抑揚',
         '抑扬基(Hz)': '抑揚の基準(Hz)',
+        '音频切分子分割大小': 'サブセグメンテーションのサイズ',
     }
 }
 

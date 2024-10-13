@@ -24,7 +24,7 @@ IF NOT EXIST "%DPHUBERT_BIN%" (
 SET PYANNOTE_WESPEAKER_VOXCELEB_DIR=https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/resolve/main/pytorch_model.bin
 SET PYANNOTE_WESPEAKER_VOXCELEB_FILE=pytorch_model.bin
 SET PYANNOTE_WESPEAKER_VOXCELEB_BIN=%DOWNLOAD_MODEL_DIR%\pyannote.audio\wespeaker-voxceleb-resnet34-LM\%PYANNOTE_WESPEAKER_VOXCELEB_FILE%
-IF NOT EXIST "%PYANNOTE_WESPEAKER_VOXCELEB_FILE%" (
+IF NOT EXIST "%PYANNOTE_WESPEAKER_VOXCELEB_BIN%" (
     ECHO Info: Start downloading the Pyannote.audio ported wespeaker-voxceleb-resnet34 model...
     ECHO .
     curl -L -o "%PYANNOTE_WESPEAKER_VOXCELEB_BIN%" "%PYANNOTE_WESPEAKER_VOXCELEB_DIR%"
@@ -39,7 +39,7 @@ IF NOT EXIST "%PYANNOTE_WESPEAKER_VOXCELEB_FILE%" (
 SET PYANNOTE_WESPEAKER_VOXCELEB_CONF_DIR=https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/resolve/main/config.yaml
 SET PYANNOTE_WESPEAKER_VOXCELEB_CONF_FILE=config.yaml
 SET PYANNOTE_WESPEAKER_VOXCELEB_CONF_BIN=%DOWNLOAD_MODEL_DIR%\pyannote.audio\wespeaker-voxceleb-resnet34-LM\%PYANNOTE_WESPEAKER_VOXCELEB_CONF_FILE%
-IF NOT EXIST "%PYANNOTE_WESPEAKER_VOXCELEB_CONF_FILE%" (
+IF NOT EXIST "%PYANNOTE_WESPEAKER_VOXCELEB_CONF_BIN%" (
     ECHO Info: Start downloading the Pyannote.audio ported wespeaker-voxceleb-resnet34 config...
     ECHO .
     curl -L -o "%PYANNOTE_WESPEAKER_VOXCELEB_CONF_BIN%" "%PYANNOTE_WESPEAKER_VOXCELEB_CONF_DIR%"
@@ -121,9 +121,9 @@ IF NOT EXIST "%MNP_PTD_DIR%" (
 @REM SET MNP_VCTK_RND0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/random_states_0.pkl
 @REM SET MNP_VCTK_SCHED0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler.bin
 @REM SET MNP_VCTK_SCHED1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler_1.bin
-SET MNP_VCTK_MODEL_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/pytorch_model.bin
-SET MNP_VCTK_CONF_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/config.yaml
-SET MNP_VCTK_SPK_INFO_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/spk_info.npz
+SET MNP_VCTK_MODEL_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/pytorch_model.bin
+SET MNP_VCTK_CONF_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/config.yaml
+SET MNP_VCTK_SPK_INFO_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/spk_info.npz
 SET MNP_VCTK_DIR=%DOWNLOAD_MODEL_DIR%\mnp-svc\vctk-full
 IF NOT EXIST "%MNP_VCTK_DIR%" (
     ECHO Info: Start downloading the MNP-SVC weights pretrained on VCTK dataset...
