@@ -24,8 +24,9 @@ class DiscriminatorSpec(torch.nn.Module):
     ) -> None:
         super(DiscriminatorSpec, self).__init__()
         self.period = period
-        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
-        # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
+        self.log_freq_scale = self.log_frequency_scale(period)[None, :, None]
+        # self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=1.)
+        self.spec = torchaudio.transforms.Spectrogram(period, center=False, pad_mode="constant", power=None)
         # self.spec = torchaudio.transforms.Spectrogram(period, center=True, pad_mode="reflect", power=None)
         self.use_spectral_norm = use_spectral_norm
         norm_f = weight_norm if use_spectral_norm is False else spectral_norm
@@ -34,12 +35,22 @@ class DiscriminatorSpec(torch.nn.Module):
                 norm_f(
                     Conv2d(
                         1,
+                        16,
+                        (kernel_size, 7),
+                        (stride, 2),
+                        padding=(get_keep_size_padding(kernel_size, 1), 2),
+                    )
+                ),
+                norm_f(
+                    Conv2d(
+                        16,
                         32,
                         (kernel_size, 7),
                         (stride, 2),
                         padding=(get_keep_size_padding(kernel_size, 1), 2),
                     )
                 ),
+                
                 norm_f(
                     Conv2d(
                         32,
@@ -115,6 +126,16 @@ class DiscriminatorSpec(torch.nn.Module):
         #     ]
         # )
         # self.conv_p_post = SANConv2d(32, 1, (3, 1), 1, padding=(1, 0))
+        
+    def log_frequency_scale(self, n_fft, min_clip_bins=12):
+        ret = torch.log2(torch.max(torch.tensor(min_clip_bins), torch.arange(0, n_fft//2+1)) + 2) / torch.log2(torch.tensor(n_fft//2+1 + 2))
+        ret[0] = 1.
+        return ret
+    
+    def to(self, device=None, dtype=None, non_blocking=False, memory_format=torch.preserve_format):
+        super().to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        self.log_freq_scale = self.log_freq_scale.to(device=device, dtype=dtype, non_blocking=non_blocking, memory_format=memory_format)
+        return self
 
     def forward(self,
                 x: torch.Tensor,
@@ -127,8 +148,9 @@ class DiscriminatorSpec(torch.nn.Module):
             # x = torch.sqrt(x.real**2. + x.imag**2.)
             
             x = self.spec(x)
-            # x = torch.view_as_real(x)
-            # x = torch.norm(x, p='fro', dim=-1)
+            x = torch.view_as_real(x)
+            x[:, :, :, 0] = x[:, :, :, 0]*(self.log_freq_scale.to(x))
+            x = torch.norm(x, p='fro', dim=-1)
             
         x = self.convs[0](x)
         x = F.leaky_relu(x, 0.1)
@@ -951,8 +973,13 @@ class MultiPeriodSpecDiscriminator(torch.nn.Module):
         periods = [3, 17, 37]
         # spec_periods = [512, 1024, 2048]
         # spec_scales = [1., 4., 16.]
-        spec_periods = [512, 1024, 2048]
-        spec_scales = [4., 2., 1.]
+        
+        # spec_periods = [512, 1024, 2048]
+        # spec_scales = [4., 2., 1.]
+        
+        spec_periods = [32, 64, 128, 256, 512, 1024, 2048]
+        # spec_periods = [512, 1024, 2048, 32, 64, 128, 256]
+        
         # spec_periods = [7, 13, 43]
         # spec_scales = [1., 1., 2.]
 
@@ -960,11 +987,15 @@ class MultiPeriodSpecDiscriminator(torch.nn.Module):
         #     DiscriminatorSpecW(2048, hop_length=int(2048//2/scale), window_fn=variable_hann_window, wkargs={'width': scale}, use_spectral_norm=use_spectral_norm)
         #     for scale in spec_scales
         # ]
+        # discs = [
+        #     DiscriminatorSpecW(period, hop_length=int(period//2/scale), window_fn=variable_hann_window, wkargs={'width': scale}, use_spectral_norm=use_spectral_norm)
+        #     for period, scale in zip(spec_periods, spec_scales)
+        #     # DiscriminatorSpecW(period, hop_length=int(period//2/scale), window_fn=torch.hann_window, use_spectral_norm=use_spectral_norm)
+        #     # for period, scale in zip(spec_periods, spec_scales)
+        # ]
         discs = [
-            DiscriminatorSpecW(period, hop_length=int(period//2/scale), window_fn=variable_hann_window, wkargs={'width': scale}, use_spectral_norm=use_spectral_norm)
-            for period, scale in zip(spec_periods, spec_scales)
-            # DiscriminatorSpecW(period, hop_length=int(period//2/scale), window_fn=torch.hann_window, use_spectral_norm=use_spectral_norm)
-            # for period, scale in zip(spec_periods, spec_scales)
+            DiscriminatorSpec(period, use_spectral_norm=use_spectral_norm)
+            for period in spec_periods
         ]
         discs = discs + [
             DiscriminatorP(i, use_spectral_norm=use_spectral_norm) for i in periods
