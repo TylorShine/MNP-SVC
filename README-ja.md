@@ -1,6 +1,6 @@
 <h1 align="center">MNP-SVC</h1>
 <p align="center">
-Minimized-and-Noised-Phase harmonic source Singing Voice Convertion
+Minimized-and-Noised-Phase harmonic source Singing Voice Convertion [v2]
 </p>
 
 ---
