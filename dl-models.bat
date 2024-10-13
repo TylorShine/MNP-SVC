@@ -81,14 +81,14 @@ IF NOT EXIST "%RMVPE_PT_FILE%" (
 
 @REM download MNP-SVC pretrained weights
 @REM TODO: rewrite URLs
-SET MNP_PTD_OPT0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/optimizer.bin
-SET MNP_PTD_OPT1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/optimizer_1.bin
-SET MNP_PTD_MODEL0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/pytorch_model.bin
-SET MNP_PTD_MODEL1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/pytorch_model_1.bin
-SET MNP_PTD_MODEL2_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/pytorch_model_2.bin
-SET MNP_PTD_RND0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/random_states_0.pkl
-SET MNP_PTD_SCHED0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler.bin
-SET MNP_PTD_SCHED1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler_1.bin
+SET MNP_PTD_OPT0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/optimizer.bin
+SET MNP_PTD_OPT1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/optimizer_1.bin
+SET MNP_PTD_MODEL0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/pytorch_model.bin
+SET MNP_PTD_MODEL1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/pytorch_model_1.bin
+SET MNP_PTD_MODEL2_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/pytorch_model_2.bin
+SET MNP_PTD_RND0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/random_states_0.pkl
+SET MNP_PTD_SCHED0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/scheduler.bin
+SET MNP_PTD_SCHED1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/resolve/main/states/cp0/scheduler_1.bin
 SET MNP_PTD_DIR=%DOWNLOAD_MODEL_DIR%\mnp-svc\states\cp0
 IF NOT EXIST "%MNP_PTD_DIR%" (
     ECHO Info: Start downloading the MNP-SVC pretrained weights...
@@ -121,9 +121,9 @@ IF NOT EXIST "%MNP_PTD_DIR%" (
 @REM SET MNP_VCTK_RND0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/random_states_0.pkl
 @REM SET MNP_VCTK_SCHED0_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler.bin
 @REM SET MNP_VCTK_SCHED1_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/resolve/main/states/cp0/scheduler_1.bin
-SET MNP_VCTK_MODEL_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/model_10000/pytorch_model.bin
-SET MNP_VCTK_CONF_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/model_10000/config.yaml
-SET MNP_VCTK_SPK_INFO_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/model_10000/spk_info.npz
+SET MNP_VCTK_MODEL_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/pytorch_model.bin
+SET MNP_VCTK_CONF_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/config.yaml
+SET MNP_VCTK_SPK_INFO_DIR=https://huggingface.co/TylorShine/MNP-SVC-v2-VCTK/blob/main/spk_info.npz
 SET MNP_VCTK_DIR=%DOWNLOAD_MODEL_DIR%\mnp-svc\vctk-full
 IF NOT EXIST "%MNP_VCTK_DIR%" (
     ECHO Info: Start downloading the MNP-SVC weights pretrained on VCTK dataset...
