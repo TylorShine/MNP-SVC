@@ -261,7 +261,7 @@ class GUI:
         # 界面布局
         layout = [
             [sg.Frame(layout=[
-                [sg.Input(key='sg_model', default_text='models\\vctk-partial\\model_0.pt'),
+                [sg.Input(key='sg_model', default_text='models\\pretrained\\mnp-svc\\vctk-full\\pytorch_model.bin'),
                  sg.FileBrowse(i18n('选择模型文件'), key='choose_model')]
             ], title=i18n('模型：.pt格式(自动识别同目录下config.yaml)')),
                 sg.Frame(layout=[
@@ -300,7 +300,7 @@ class GUI:
                 sg.Frame(layout=[
                     [sg.Text(i18n("音频切分大小")),
                     #  sg.Slider(range=(0.05, 3.0), orientation='h', key='block', resolution=0.01, default_value=0.3,
-                     sg.Slider(range=(1, 256), orientation='h', key='block', resolution=1, default_value=64,
+                     sg.Slider(range=(1, 256), orientation='h', key='block', resolution=1, default_value=50,
                                enable_events=True)],
                     [sg.Text(i18n("交叉淡化时长")),
                     #  sg.Slider(range=(0.0, 0.15), orientation='h', key='crossfade', resolution=0.005,
@@ -310,7 +310,7 @@ class GUI:
                                default_value=0.04, enable_events=True)],
                     [sg.Text(i18n("额外推理时长")),
                     #  sg.Slider(range=(0.05, 5), orientation='h', key='extra', resolution=0.01, default_value=2.0,
-                     sg.Slider(range=(0.0, 5.), orientation='h', key='extra', resolution=0.01, default_value=0.0,
+                     sg.Slider(range=(0.0, 5.), orientation='h', key='extra', resolution=0.01, default_value=1.0,
                                enable_events=True)],
                     [sg.Text(i18n("f0预测模式")),
                      sg.Combo(values=self.f0_mode_list, key='f0_mode', default_value=self.f0_mode_list[-1],

@@ -1,4 +1,5 @@
 import os
+import shutil
 import argparse
 
 import torch
@@ -96,5 +97,12 @@ if __name__ == '__main__':
     if ds_test is not None:
         preprocess_main(args.data.dataset_path, ds_test, params=params)
     
-    os.makedirs(args.env.expdir, exist_ok=True)
+    os.makedirs(os.path.join(args.env.expdir), exist_ok=True)
     
+    if os.path.isdir(os.path.join(args.env.expdir, "states", "cp0")):
+        # skipping copy files if already exists
+        print("Skipping copy to pretrained weights, already exists")
+    else:
+        print("Copying pretrained weights...")
+        shutil.copytree("./models/pretrained/mnp-svc/states", os.path.join(args.env.expdir, "states"), dirs_exist_ok=True)
+        print("Done!")

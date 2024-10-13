@@ -578,8 +578,8 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                 # losses = [loss_gen*0.5, loss_fm*0.02]    # TODO: parametrize
                 # losses = [loss_gen, loss_fm*0.1]    # TODO: parametrize
                 # losses = [loss_gen, loss_fm]    # TODO: parametrize
-                # losses = [loss_gen, loss_fm*2.]    # TODO: parametrize
-                losses = [loss_gen, loss_fm*1.5]    # TODO: parametrize
+                losses = [loss_gen, loss_fm*2.]    # TODO: parametrize
+                # losses = [loss_gen, loss_fm*1.5]    # TODO: parametrize
                 # losses = [loss_gen, loss_fm*1.25]    # TODO: parametrize
                 # losses = [loss_gen, loss_fm*1.3]    # TODO: parametrize
                 # losses = [loss_gen, loss_fm*1.05]    # TODO: parametrize
@@ -606,9 +606,9 @@ def train(args, initial_global_step, nets_g, nets_d, loader_train, loader_test):
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*15.)
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*13.)
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*12.)
-                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*11.)
+                        losses.append(loss_func(signal.to(dtype), audio.to(dtype))*11.)
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*8.)
-                        losses.append(loss_func(signal.to(dtype), audio.to(dtype))*5.)
+                        # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*5.)
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*10.)
                         # losses.append(loss_func(signal.to(dtype), audio.to(dtype))*3.)
                 else:
