@@ -28,10 +28,11 @@ MNPとは: Minimized-and-Noised-Phase harmonic source です。
 いくつかの実験の結果、不自然で少し耳につく変換結果はおそらく位相が線形であることに起因するであろうと(経験から)仮定して、サウンド合成器のハーモニックソースを線形位相sinc関数から窓関数を適用した最小位相sinc関数に変更しました。(そしておそらく、線形位相であることはフィルタの学習を難しくしています。)  
 このことは、人の音声を含む自然で発生しうるすべての音は最小位相であることからも適切であると考えます。  
 音響モデルも改善しました: Noised-Phase Harmonic Source (私は学者ではありませんが、そう名付けました。)
+(今のところ、Noised-Phase要素は使われていません。)
 
 
 DDSP-SVCとのAIモデルの構造の違いは、大まかに:
-- 畳み込み層(ResNet含む)を ConvNeXt V2 を参考にした形に変更
+- 畳み込み層(ResNet含む)を ConvNeXt V2 を参考にし、GLUのような構造を取り入れた形に変更
 - 話者埋め込みを使用 (無効にすることもできます。その場合は変換先話者への特徴のフィット性能が落ちるようです。)
   - 埋め込み使用時、多数話者のデータセットで学習すれば、few-shot変換が可能かもしれません。
 - F0、位相、話者埋め込みをまとめたあとに畳み込み層を追加しています。
@@ -44,12 +45,13 @@ DDSP-SVCとのAIモデルの構造の違いは、大まかに:
 
 ### (Windowsユーザー向け) 簡易セットアップ
 
-`launch.bat` をダブルクリックします。このスクリプトは初回実行時に:
+`dl-models.bat` と `launch.bat` をダブルクリックします。このスクリプトは初回実行時に:
 
-1. [WinPython](https://winpython.github.io/) のダウンロード
-1. ダウンロードしたファイルの展開
-1. Python venv 環境を作成し、依存パッケージをインストール
-1. 事前学習モデルのダウンロード
+1. 事前学習モデルのダウンロード (dl-models.bat)
+1. [MicroMamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html) のダウンロード
+1. ダウンロードしたファイルを展開しポータブルなPython環境を構築
+1. そのPython環境に対し、依存パッケージをインストール
+
 
 を実行します.  
 次回からは、このスクリプトを実行して起動したコンソールを使用できます。
@@ -67,7 +69,7 @@ pip install -r requirements/main.txt
 
 を実行して依存パッケージをインストールします。
 
-作者は python 3.11.8/3.12.2 (windows) + cuda 11.8 + torch 2.2.1 のみで実行を確認しています。古すぎたり新しすぎるバージョンでは動かないかもしれません。
+作者は python 3.11.9/3.12.2 (windows) + cuda 12.1 + torch 2.4.1 のみで実行を確認しています。古すぎたり新しすぎるバージョンでは動かないかもしれません。
 
 
 #### 1-2. 事前学習モデルのダウンロード
@@ -86,7 +88,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/)  ([pytorch_mode
 
 - MNP-SVC 事前学習モデル:
 
-  [事前学習モデル](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt) をダウンロードします。後で使うのでどこに保存したか覚えておいてください。
+  [事前学習モデル](https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/tree/main) をダウンロードし、`models/pretrained/mnp-svc/`以下にそのまま配置します。
   - 必要に応じて [一部の畳み込み層のみの事前学習モデル](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.1/model_0.pt) も使用可能です。こちらは声質や話者の特徴分布が学習されていないものです。
 
 
@@ -122,23 +124,22 @@ dataset/audio/bbb.wav
 その後、
 
 ```bash
-python sortup.py -c configs/combsub-mnp.yaml
+python sortup.py -c configs/combsub-mnp-san.yaml
 ```
 
 を実行します。これは自動で "train" と "test" にデータセットを振り分けます。この際のパラメーターを調整したい場合は、 `python sortup.py -h` を実行してヘルプを確認してください。  
 そして、
 
 ```bash
-python preprocess.py -c configs/combsub-mnp.yaml
+python preprocess.py -c configs/combsub-mnp-san.yaml
 ```
 
-を実行します。この事前処理が終わったら、先程ダウンロードした MNP-SVC 事前学習モデル (`model_0.pt`、もしくは`launch.bat`により自動でダウンロードされた `models/vctk-partial/model_0.pt`) を `dataset/exp/combsub-mnp/` 以下に配置します。
-
+を実行します。
 
 ## 3. 🎓️学習
 
 ```bash
-python train.py -c configs/combsub-mnp.yaml
+python train.py -c configs/combsub-mnp-san.yaml
 ```
 
 を実行します。
@@ -228,3 +229,6 @@ python -m tools.export_onnx -i <model_num.pt>
 
 - [ConvNeXt V2](https://github.com/facebookresearch/ConvNeXt-V2)
 
+- [BigVGAN](https://github.com/NVIDIA/BigVGAN)
+
+- [BigVSAN](https://github.com/sony/bigvsan)

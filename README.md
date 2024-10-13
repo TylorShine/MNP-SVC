@@ -1,6 +1,6 @@
 <h1 align="center">MNP-SVC</h1>
 <p align="center">
-Minimized-and-Noised-Phase harmonic source Singing Voice Convertion
+Minimized-and-Noised-Phase harmonic source Singing Voice Convertion [v2]
 </p>
 
 ---
@@ -27,10 +27,11 @@ MNP refers: Minimized-and-Noised-Phase harmonic source.
 After some experimentation, I changed harmonic source signal of synthesizer from linear-phase sinc to minimized-phase windowed sinc because I put the assumption that the unnatural and slightly not catchy sensations of the result may be due to the fact that the phase is linear. (And maybe, that thing made learning filters harder.)
 This is appropriate that I think because all naturally occurring sounds, including human voices, are in minimum phase.  
 And improved acoustic model: The Noised-Phase Harmonic Source (named by me, I'm not a scholar.).
+(For now, a Noised-Phase feature is unused.)
 
 
 Different of model structure from DDSP-SVC is about:
-- Use the ConvNeXt-V2-like convolution layers
+- Use the ConvNeXt-V2-like convolution layers with GLU-ish structure
 - Use speaker embedding (optionally you can disable it)
 - Use conv layer after combining F0, phase and speaker embed
 
@@ -42,11 +43,11 @@ Disclaimer: Please make sure to only train DDSP-SVC models with **legally obtain
 
 ### (for Windows users) Easy setup
 
-Simply double-clicking `launch.bat`. This script doing:
-1. Download the [WinPython](https://winpython.github.io/)
-1. Extract downloaded archive
-1. Make the venv python environment and install require packages
-1. Download pre-trained models
+Simply double-clicking `dl-models.bat` and `launch.bat`. This scripts doing:
+1. Download the pre-trained models if not exist (dl-models.bat)
+1. Download the [MicroMamba](https://mamba.readthedocs.io/en/latest/user_guide/micromamba.html)
+1. Extract downloaded archive and create portable Python environment
+1. Install require packages to the portable Python environment
 
 when first time execution.  
 For the next time, you can launch this script and use this console.
@@ -61,7 +62,7 @@ We recommend first installing the PyTorch from the [official website](https://py
 pip install -r requirements/main.txt
 ```
 
-NOTE: I only test the code using python 3.11.8 (windows) / 3.12.1 (Ubuntu) + cuda 11.8 + torch 2.2.2, too new or too old dependencies may not work.
+NOTE: I only test the code using python 3.11.9/3.12.2 (windows) + cuda 12.1 + torch 2.4.1, too new or too old dependencies may not work.
 
 
 #### 1-2. Download pre-trained models
@@ -78,7 +79,7 @@ https://huggingface.co/pyannote/wespeaker-voxceleb-resnet34-LM/) speaker embed e
 
 - MNP-SVC pre-trained model:
 
-  Download the [pre-trained model](https://huggingface.co/TylorShine/MNP-SVC-VCTK-partial/blob/main/model_0.pt). Use this later, keep in mind.
+  Download the [pre-trained weights](https://huggingface.co/TylorShine/MNP-SVC-v2-pretrained/tree/main) and put them under `models/pretrained/mnp-svc/` folder.
   - [pre-trained only few conv layers model](https://github.com/TylorShine/MNP-SVC/releases/download/v0.0.1/model_0.pt) is also available. This model was not trained the voice characters, speaker distributions etc.
 
 
@@ -113,23 +114,21 @@ dataset/audio/bbb.wav
 then run
 
 ```bash
-python sortup.py -c configs/combsub-mnp.yaml
+python sortup.py -c configs/combsub-mnp-san.yaml
 ```
 
 to divide your datasets to "train" and "test" automatically. If you wanna adjust some parameters, run `python sortup.py -h` to help you.
 After that, then run
 
 ```bash
-python preprocess.py -c configs/combsub-mnp.yaml
+python preprocess.py -c configs/combsub-mnp-san.yaml
 ```
-
-After done, put a MNP-SVC pre-trained model (`model_0.pt`. or `models/vctk-partial/model_0.pt` that automatically downloaded by `launch.bat`) to under `dataset/exp/combsub-mnp/`.
 
 
 ## 3. 🎓️Training
 
 ```bash
-python train.py -c configs/combsub-mnp.yaml
+python train.py -c configs/combsub-mnp-san.yaml
 ```
 
 You can safely interrupt training, then running the same command line will resume training.
@@ -214,5 +213,8 @@ The exported onnx files can be used in the same way for real-time and non-real-t
 - [DPHuBERT](https://github.com/pyf98/DPHuBERT)
 
 - [ConvNeXt V2](https://github.com/facebookresearch/ConvNeXt-V2)
+
+- [BigVGAN](https://github.com/NVIDIA/BigVGAN)
   
+- [BigVSAN](https://github.com/sony/bigvsan)
   
