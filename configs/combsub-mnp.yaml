@@ -31,6 +31,7 @@ model:
   noise_to_harmonic_phase: true
   use_harmonic_env: false
   use_noise_env: true
+  use_add_noise_env: false
   use_f0_offset: true
   noise_seed: 289
   use_speaker_embed: true # set false when you don't wanna use speaker embed
@@ -40,9 +41,11 @@ loss:
   fft_min: 256
   fft_max: 2048
   use_dual_scale: false
-  use_dual_scale_log_freq: true
+  use_dual_scale_log_freq: false
+  use_dual_scale_log_freq_magphase: true
   n_scale: 4 # rss kernel numbers
   beta: 0.8
+  gamma: 0.05
   overlap: 0.5
 device: cuda
 env:

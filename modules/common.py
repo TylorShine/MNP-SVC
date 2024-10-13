@@ -54,10 +54,21 @@ def load_model(
             path_pt = path+'best.pt'
         if os.path.isfile(path_pt):
             print(' [*] restoring model from', path_pt)
-            ckpt = torch.load(path_pt, map_location=torch.device(device))
+            ckpt = torch.load(path_pt, map_location=torch.device(device), weights_only=True)
             global_step = ckpt['global_step']
             states = ckpt.get('states')
+            model.to(device)
             model.load_state_dict(ckpt['model'], strict=False)
             if ckpt.get('optimizer') != None:
+                # optimizer.load_state_dict(ckpt['optimizer'])
                 optimizer.load_state_dict(ckpt['optimizer'])
     return global_step, model, optimizer, states
+
+
+def complex_mul_in_real_3d(a: torch.complex, b: torch.complex):
+    a_vr = torch.view_as_real(a)
+    b_vr = torch.view_as_real(b)
+    x = torch.empty_like(a_vr)
+    x[:, :, 0] = a_vr[:, :, 0]*b_vr[:, :, 0] - a_vr[:, :, 1]*b_vr[:, :, 1]
+    x[:, :, 1] = a_vr[:, :, 0]*b_vr[:, :, 1] - a_vr[:, :, 1]*b_vr[:, :, 0]
+    return torch.view_as_complex(x)

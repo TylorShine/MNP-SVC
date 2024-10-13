@@ -15,6 +15,9 @@ class UnitsEncoder:
         if encoder == 'dpwavlmbase':
             self.model = Audio2DPWavLM(encoder_ckpt, device=device, extract_layer=max(max(extract_layers)), extract_layers=extract_layers)
             is_loaded_encoder = True
+        if encoder == 'phrex':
+            self.model = Audio2Phrex(encoder_ckpt, encoder_sample_rate, device=device)
+            is_loaded_encoder = True
         if not is_loaded_encoder:
             raise ValueError(f" [x] Unknown units encoder: {encoder}")
             
@@ -28,7 +31,8 @@ class UnitsEncoder:
     def encode(self, 
                 audio, # B, T
                 sample_rate,
-                hop_size): 
+                hop_size,
+                f0=None):
         
         # resample
         if sample_rate == self.encoder_sample_rate:
@@ -38,11 +42,14 @@ class UnitsEncoder:
             if key_str not in self.resample_kernel:
                 self.resample_kernel[key_str] = torchaudio.transforms.Resample(sample_rate, self.encoder_sample_rate, lowpass_filter_width = 128).to(self.device)
             audio_res = self.resample_kernel[key_str](audio)
-        
+                    
         # encode
         if audio_res.size(-1) < 400:
             audio_res = torch.nn.functional.pad(audio, (0, 400 - audio_res.size(-1)))
-        units = self.model(audio_res)
+        if f0 is None:
+            units = self.model(audio_res)
+        else:
+            units = self.model(audio_res, f0)
         
         if self.no_alignment:
             return units
@@ -63,8 +70,8 @@ class UnitsEncoder:
             units_aligned = units_aligned.view(*units_aligned.shape[0:2], orig_dim, units_aligned.shape[2]//orig_dim)
         if self.skip_frames > 0:
             units_aligned = torch.repeat_interleave(units_aligned[:, ::self.skip_frames+1], self.skip_frames+1, dim=1)[:, :units_aligned.shape[1]]
-
-            
+        
+        
         return units_aligned
     
     
@@ -130,4 +137,36 @@ class Audio2DPWavLM():
                 units = torch.stack(units, dim=1).squeeze(0)
             else:
                 units = self.model.extract_features(audio, num_layers=self.extract_layer)[0][0]
+            return units
+        
+        
+class Audio2Phrex():
+    def __init__(self, path, sample_rate, device='cpu'):
+        from ..encoders.phrex.decoder import load_model, get_normalized_spectrogram
+        from ..extractors.spec import SpecExtractor
+        self.sample_rate = sample_rate
+        self.device = device
+        print(' [Encoder Model] Phrex')
+        print(' [Loading] ' + path)
+        self.model, self.args = load_model(path, device=device)
+        
+        self.spec_extractor = SpecExtractor(
+            self.args.model.spec_n_fft,
+            self.args.model.in_channels,
+            self.args.data.block_size,
+            # self.args.data.sampling_rate,
+            sample_rate,
+            device=device)
+
+    def __call__(self,
+                 audio): # B, T
+        with torch.no_grad():
+            # print(audio.shape)
+            spec = self.spec_extractor.extract(audio.float().to(self.spec_extractor.device)).squeeze()
+            spec: torch.Tensor
+            spec = (spec / (spec.max(dim=-1, keepdim=True).values + 1e-3))[:, :self.args.model.in_channels].unsqueeze(0)
+            
+            # print(spec.shape)
+            
+            units = self.model.infer(spec, self.sample_rate)
             return units

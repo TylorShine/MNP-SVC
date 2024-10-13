@@ -138,6 +138,7 @@ def parse_args(args=None, namespace=None):
         type=str,
         required=False,
         default="CPUExecutionProvider",
+        # default="CUDAExecutionProvider,CPUExecutionProvider",
         help="execution provider names of onnxruntime, separate by comma | default: CPUExecutionProvider"
     )
     return parser.parse_args(args=args, namespace=namespace)
@@ -185,9 +186,20 @@ if __name__ == '__main__':
     model_path_splitext = os.path.splitext(cmd.model_path)
     if len(model_path_splitext) < 2:
         raise ValueError(f" [x] no extension found in filename, skip process: {cmd.model_path}")
+    is_onnx = False
     if model_path_splitext[1] == '.onnx':
-        model, args, spk_info = load_onnx_model(cmd.model_path, providers=cmd.onnx_providers.split(','))
+        is_onnx = True
+        model_, args, spk_info = load_onnx_model(cmd.model_path, providers=cmd.onnx_providers.split(','))
         device = 'cpu'  # TODO: change device by onnx session providers
+        model = lambda units, f0, volume, spk_id, spk_mix: model_.run(
+            ['signal'],
+            {
+                'units_frames': units.cpu().numpy(),
+                'f0_frames': f0.cpu().numpy(),
+                'volume_frames': volume.cpu().numpy(),
+                'spk_id': spk_id.cpu().numpy(),
+                'spk_mix': spk_mix.cpu().numpy()}
+            )[0]
     else:
         model, args, spk_info = load_model(cmd.model_path, device=device)
     
@@ -257,6 +269,8 @@ if __name__ == '__main__':
     mask = np.array([np.max(mask[n : n + 9]) for n in range(len(mask) - 8)])
     mask = torch.from_numpy(mask).float().to(device).unsqueeze(-1).unsqueeze(0)
     mask = upsample(mask, args.data.block_size).squeeze(-1)
+    if is_onnx:
+        mask = mask.numpy()
     volume = torch.from_numpy(volume).float().to(device).unsqueeze(-1).unsqueeze(0)
     
     # load units encoder
@@ -337,15 +351,16 @@ if __name__ == '__main__':
             seg_f0 = f0[:, start_frame : start_frame + seg_units.size(1), :]
             seg_volume = volume[:, start_frame : start_frame + seg_units.size(1), :]
             
-            
             seg_output = model(seg_units, seg_f0, seg_volume, spk_id=spk_id, spk_mix=spk_mix)
             
             seg_output *= mask[:, start_frame * args.data.block_size : (start_frame + seg_units.size(1)) * args.data.block_size]
             
+            seg_output = seg_output.squeeze()
+            
             output_sample_rate = args.data.sampling_rate
             
-            
-            seg_output = seg_output.squeeze().cpu().numpy()
+            if not is_onnx:
+                seg_output = seg_output.cpu().numpy()
             
             
             silent_length = round(start_frame * args.data.block_size * output_sample_rate / args.data.sampling_rate) - current_length

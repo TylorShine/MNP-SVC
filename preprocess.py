@@ -1,4 +1,5 @@
 import os
+import shutil
 import argparse
 
 import torch
@@ -45,6 +46,13 @@ if __name__ == '__main__':
     # make metadatas
     make_metadata(args.data.dataset_path, args.data.extensions)
     
+    mel_vocoder_args = {}
+    
+    if "Diffusion" in args.model.type:
+        mel_vocoder_args.update({
+            'mel_vocoder_type': args.model.vocoder.type,
+            'mel_vocoder_ckpt': args.model.vocoder.ckpt,
+        })
     
     # preprocessor parameters
     params = PreprocessorParameters(
@@ -66,6 +74,8 @@ if __name__ == '__main__':
         units_encoder_hop_size=args.data.encoder_hop_size,
         units_encoder_extract_layers=args.model.units_layers,
         volume_extractor_window_size=args.data.volume_window_size,
+        use_mel="Diffusion" in args.model.type,
+        **mel_vocoder_args,
         device=device)
     
     # get dataset
@@ -87,5 +97,12 @@ if __name__ == '__main__':
     if ds_test is not None:
         preprocess_main(args.data.dataset_path, ds_test, params=params)
     
-    os.makedirs(args.env.expdir, exist_ok=True)
+    os.makedirs(os.path.join(args.env.expdir), exist_ok=True)
     
+    if os.path.isdir(os.path.join(args.env.expdir, "states", "cp0")):
+        # skipping copy files if already exists
+        print("Skipping copy to pretrained weights, already exists")
+    else:
+        print("Copying pretrained weights...")
+        shutil.copytree("./models/pretrained/mnp-svc/states", os.path.join(args.env.expdir, "states"), dirs_exist_ok=True)
+        print("Done!")
