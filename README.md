@@ -5,9 +5,9 @@ Minimized-and-Noised-Phase harmonic source Singing Voice Convertion [v2]
 
 ---
 
-Language: [**English**](./README.md) | [简体中文* (comming soon)](#) | [한국어* (comming soon)](#) | [日本語](./README-ja.md)  
+Language: [**English**](#) | [简体中文](./README-zh.md) | [한국어\*](./README-ko.md) | [日本語](./README-ja.md)  
 
-(*: machine translation. PR is welcome to native translations!)
+(\*: machine translation. PR is welcome to native translations!)
 
 
 ## 📒Introduction
