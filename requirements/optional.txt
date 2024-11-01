@@ -1,6 +1,9 @@
 # speaker embed extractor
 resemblyzer
 
+# onnxsim
+onnxsim
+
 # model loader
 # fairseq (python>=3.11.x is not supported now by official repos)
 # use fork (thanks a lot!)

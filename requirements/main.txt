@@ -8,7 +8,6 @@ numpy
 onnx
 # onnxruntime
 onnxruntime-gpu   # for gpu
-onnxsim
 PyYAML
 pyworld
 resampy
