@@ -26,9 +26,9 @@ def parse_args(args=None, namespace=None):
         help="path to the output onnx file. if not provided, use <input>-mnp.onnx")
     parser.add_argument(
         "-s",
-        "--no-simplify-onnx",
+        "--simplify-onnx",
         action="store_true",
-        help="no simplify onnx by onnxsim",
+        help="simplify onnx by onnxsim",
     )
     parser.add_argument(
         "-q",
@@ -209,9 +209,8 @@ if __name__ == '__main__':
         
     print(f'successful to export onnx: {output_file}')
         
-    if cmd.no_simplify_onnx:
-        print(f'successful to export onnx: {output_file}')
-    else:
+    
+    if cmd.simplify_onnx:
         import onnx
         from onnxsim import simplify
         model = onnx.load(output_file)
@@ -224,6 +223,8 @@ if __name__ == '__main__':
         
         print()
         print(f'successful to export onnx(simplified): {output_file}')
+    else:
+        print(f'successful to export onnx: {output_file}')
         
     if cmd.quantization:
         # quantize the model (TODO: now not to work. no use dynamic shapes needed but...)
