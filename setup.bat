@@ -98,7 +98,7 @@ ECHO Info: Update pip...
 python -m pip install -U pip
 
 @REM install torch
-SET TORCH_INSTALL_CMD=uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/nightly/cu121
+SET TORCH_INSTALL_CMD=uv pip install torch torchvision torchaudio --index-url https://download.pytorch.org/whl/cu121
 SET TORCH_PACKAGE=torch
 uv pip show torch > NUL
 IF %ERRORLEVEL% neq 0 (
