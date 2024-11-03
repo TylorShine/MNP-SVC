@@ -53,6 +53,7 @@ loss:
 device: cuda
 env:
   expdir: dataset/exp/combsub-mnp
+  project_name: 'combsub-mnp-san'
   gpu_id: 0
 train:
   num_workers: 2 # If your cpu and gpu are both very strong, set to 0 may be faster!
